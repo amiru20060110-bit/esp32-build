@@ -1,4 +1,4 @@
-#define SPEAKER_PIN 4
+#define SPEAKER_PIN 17
 
 void setup() {
   // Attach PWM to pin, 1000 Hz, 8-bit resolution
