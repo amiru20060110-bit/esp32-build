@@ -1,18 +1,16 @@
 #define SPEAKER_PIN 4
-#define CHANNEL 0
-#define RESOLUTION 8   // 8-bit PWM
 
 void setup() {
-  ledcSetup(CHANNEL, 1000, RESOLUTION); // 1000 Hz tone
-  ledcAttachPin(SPEAKER_PIN, CHANNEL);
+  // Attach PWM to pin, 1000 Hz, 8-bit resolution
+  ledcAttach(SPEAKER_PIN, 1000, 8);
 }
 
 void loop() {
-  // Play note
-  ledcWrite(CHANNEL, 128);  // 50% duty → sound ON
+  // Play tone
+  ledcWrite(SPEAKER_PIN, 20);  // LOW volume (safe)
   delay(500);
 
   // Silence
-  ledcWrite(CHANNEL, 0);    // sound OFF
+  ledcWrite(SPEAKER_PIN, 0);
   delay(500);
 }
