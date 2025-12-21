@@ -4,17 +4,20 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
+#define SAMPLE_RATE 44100
+#define TONE_FREQ   220   // Try 110, 220, 440
+
 void setup() {
   i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-    .sample_rate = 44100,
+    .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_I2S,
     .intr_alloc_flags = 0,
     .dma_buf_count = 8,
-    .dma_buf_len = 64,
-    .use_apll = false,
+    .dma_buf_len = 256,
+    .use_apll = true,
     .tx_desc_auto_clear = true
   };
 
@@ -30,14 +33,18 @@ void setup() {
 }
 
 void loop() {
-  static int16_t buffer[64];
-  static int phase = 0;
+  static float phase = 0.0f;
+  const float phase_inc = (float)TONE_FREQ / SAMPLE_RATE;
 
-  for (int i = 0; i < 64; i++) {
-    buffer[i] = (phase < 32) ? 16000 : -16000;  // square wave
-    phase = (phase + 1) % 64;
-  }
-
+  int16_t sample;
   size_t bytes_written;
-  i2s_write(I2S_NUM_0, buffer, sizeof(buffer), &bytes_written, portMAX_DELAY);
+
+  // Sawtooth: -1.0 → +1.0
+  phase += phase_inc;
+  if (phase >= 1.0f) phase -= 1.0f;
+
+  float saw = (phase * 2.0f) - 1.0f;
+  sample = (int16_t)(saw * 14000);  // adjust volume
+
+  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bytes_written, portMAX_DELAY);
 }
