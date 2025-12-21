@@ -6,13 +6,18 @@
 #define I2S_DOUT 3
 
 #define SAMPLE_RATE 44100
-#define NOTE_FREQ 220
-#define BUF_LEN 256
+#define NOTE_FREQ 220.0f
 
-float p1 = 0, p2 = 0, p3 = 0;
+float p1 = 0, p2 = 0;
 float env = 0;
 
-int16_t buffer[BUF_LEN];
+float lp = 0;
+float dc_prev = 0;
+float dc_out = 0;
+
+inline float softSquare(float phase) {
+  return tanh(sinf(phase) * 2.5f);
+}
 
 void setup() {
   i2s_config_t i2s_config = {
@@ -21,9 +26,9 @@ void setup() {
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_I2S,
-    .intr_alloc_flags = 0,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 8,
-    .dma_buf_len = BUF_LEN,
+    .dma_buf_len = 256,
     .use_apll = true,
     .tx_desc_auto_clear = true
   };
@@ -41,46 +46,27 @@ void setup() {
 }
 
 void loop() {
-  // Slow organ-style attack
-  env += 0.0002;
-  if (env > 1.0) env = 1.0;
+  size_t bw;
 
-  static float lp = 0;
-  static float dc = 0;
+  if (env < 1.0f) env += 0.0004f;
 
-  for (int i = 0; i < BUF_LEN; i++) {
+  p1 += 2 * PI * NOTE_FREQ / SAMPLE_RATE;
+  p2 += 2 * PI * (NOTE_FREQ * 1.005f) / SAMPLE_RATE;
 
-    // Oscillators (slight detune)
-    p1 += 2 * PI * NOTE_FREQ / SAMPLE_RATE;
-    p2 += 2 * PI * (NOTE_FREQ * 1.003) / SAMPLE_RATE;
-    p3 += 2 * PI * (NOTE_FREQ * 0.997) / SAMPLE_RATE;
+  if (p1 > 2 * PI) p1 -= 2 * PI;
+  if (p2 > 2 * PI) p2 -= 2 * PI;
 
-    if (p1 > 2 * PI) p1 -= 2 * PI;
-    if (p2 > 2 * PI) p2 -= 2 * PI;
-    if (p3 > 2 * PI) p3 -= 2 * PI;
+  float tone =
+    softSquare(p1) * 0.7f +
+    softSquare(p2) * 0.3f;
 
-    float tone =
-        sin(p1) * 0.6 +
-        sin(p2) * 0.2 +
-        sin(p3) * 0.2;
+  lp += 0.02f * (tone - lp);
 
-    // Strong smoothing (anti-alias & warmth)
-    lp += 0.006 * (tone - lp);
+  dc_out = lp - dc_prev + 0.995f * dc_out;
+  dc_prev = lp;
 
-    // Apply envelope
-    float out = lp * env;
+  //  50% volume (was 14000, now 7000)
+  int16_t sample = (int16_t)(dc_out * env * 7000);
 
-    // Noise gate (true silence)
-    if (env < 0.002) out = 0.0;
-
-    // DC blocker (removes hiss bias)
-    dc += 0.00001 * (out - dc);
-    out -= dc;
-
-    // Reduced digital gain (better SNR)
-    buffer[i] = (int16_t)(out * 12000);
-  }
-
-  size_t bytes_written;
-  i2s_write(I2S_NUM_0, buffer, sizeof(buffer), &bytes_written, portMAX_DELAY);
+  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
 }
