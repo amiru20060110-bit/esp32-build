@@ -41,11 +41,16 @@ void setup() {
 }
 
 void loop() {
-  // VERY slow attack (organ-like)
+  // Slow organ-style attack
   env += 0.0002;
   if (env > 1.0) env = 1.0;
 
+  static float lp = 0;
+  static float dc = 0;
+
   for (int i = 0; i < BUF_LEN; i++) {
+
+    // Oscillators (slight detune)
     p1 += 2 * PI * NOTE_FREQ / SAMPLE_RATE;
     p2 += 2 * PI * (NOTE_FREQ * 1.003) / SAMPLE_RATE;
     p3 += 2 * PI * (NOTE_FREQ * 0.997) / SAMPLE_RATE;
@@ -59,10 +64,21 @@ void loop() {
         sin(p2) * 0.2 +
         sin(p3) * 0.2;
 
-    static float lp = 0;
-    lp += 0.01 * (tone - lp);
+    // Strong smoothing (anti-alias & warmth)
+    lp += 0.006 * (tone - lp);
 
-    buffer[i] = (int16_t)(lp * env * 15000);
+    // Apply envelope
+    float out = lp * env;
+
+    // Noise gate (true silence)
+    if (env < 0.002) out = 0.0;
+
+    // DC blocker (removes hiss bias)
+    dc += 0.00001 * (out - dc);
+    out -= dc;
+
+    // Reduced digital gain (better SNR)
+    buffer[i] = (int16_t)(out * 12000);
   }
 
   size_t bytes_written;
