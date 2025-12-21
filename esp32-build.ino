@@ -1,14 +1,14 @@
 #include <driver/i2s.h>
 #include <math.h>
 
-#define I2S_BCLK 1
-#define I2S_LRC  2
-#define I2S_DOUT 3
+#define I2S_BCLK 40
+#define I2S_LRC  41
+#define I2S_DOUT 42
 
 #define SAMPLE_RATE 44100
-#define NOTE_FREQ 220   // Try 110, 220, 440
+#define NOTE_FREQ 220
 
-float phase1 = 0, phase2 = 0;
+float p1 = 0, p2 = 0, p3 = 0;
 float env = 0;
 
 void setup() {
@@ -37,26 +37,31 @@ void setup() {
 }
 
 void loop() {
-  size_t bytes_written;
+  size_t bw;
 
-  // Envelope (slow attack)
-  env += 0.0008;
+  // VERY slow attack (organ-like)
+  env += 0.0003;
   if (env > 1.0) env = 1.0;
 
-  phase1 += 2.0 * PI * NOTE_FREQ / SAMPLE_RATE;
-  phase2 += 2.0 * PI * NOTE_FREQ * 2 / SAMPLE_RATE;
+  // Slight detune (chorus)
+  p1 += 2 * PI * NOTE_FREQ / SAMPLE_RATE;
+  p2 += 2 * PI * (NOTE_FREQ * 1.003) / SAMPLE_RATE;
+  p3 += 2 * PI * (NOTE_FREQ * 0.997) / SAMPLE_RATE;
 
-  if (phase1 > 2 * PI) phase1 -= 2 * PI;
-  if (phase2 > 2 * PI) phase2 -= 2 * PI;
+  if (p1 > 2 * PI) p1 -= 2 * PI;
+  if (p2 > 2 * PI) p2 -= 2 * PI;
+  if (p3 > 2 * PI) p3 -= 2 * PI;
 
+  // Pure additive organ tone
   float tone =
-      sin(phase1) * 0.7 +
-      sin(phase2) * 0.3;
+      sin(p1) * 0.6 +
+      sin(p2) * 0.2 +
+      sin(p3) * 0.2;
 
+  // Strong smoothing (kills digital noise)
   static float lp = 0;
-  lp += 0.02 * (tone - lp);
+  lp += 0.01 * (tone - lp);
 
-  int16_t sample = (int16_t)(lp * env * 14000);
-
-  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bytes_written, portMAX_DELAY);
+  int16_t sample = (int16_t)(lp * env * 15000);
+  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
 }
