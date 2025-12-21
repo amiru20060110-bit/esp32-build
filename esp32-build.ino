@@ -20,15 +20,12 @@
 float phase = 0.0f;
 
 void setup() {
-  // Row
   pinMode(ROW0, OUTPUT);
   digitalWrite(ROW0, HIGH);
 
-  // Columns
   pinMode(COL0, INPUT_PULLDOWN);
   pinMode(COL1, INPUT_PULLDOWN);
 
-  // I2S
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
@@ -54,19 +51,17 @@ void setup() {
 
 void loop() {
   size_t bw;
-
   float freq = FREQ_IDLE;
 
-  // Scan row
   digitalWrite(ROW0, LOW);
   delayMicroseconds(3);
 
-  if (digitalRead(COL0)) freq = FREQ_A3;
-  if (digitalRead(COL1)) freq = FREQ_A5;
+  // NOTE: LOW = key pressed
+  if (digitalRead(COL0) == LOW) freq = FREQ_A3;
+  if (digitalRead(COL1) == LOW) freq = FREQ_A5;
 
   digitalWrite(ROW0, HIGH);
 
-  // Audio
   phase += freq / SAMPLE_RATE;
   if (phase >= 1.0f) phase -= 1.0f;
 
