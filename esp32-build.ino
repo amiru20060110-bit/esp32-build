@@ -21,10 +21,10 @@ float phase = 0.0f;
 
 void setup() {
   pinMode(ROW0, OUTPUT);
-  digitalWrite(ROW0, HIGH);
+  digitalWrite(ROW0, HIGH);   // inactive row
 
-  pinMode(COL0, INPUT_PULLDOWN);
-  pinMode(COL1, INPUT_PULLDOWN);
+  pinMode(COL0, INPUT_PULLUP);
+  pinMode(COL1, INPUT_PULLUP);
 
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
@@ -53,12 +53,17 @@ void loop() {
   size_t bw;
   float freq = FREQ_IDLE;
 
+  // Activate row
   digitalWrite(ROW0, LOW);
   delayMicroseconds(3);
 
-  // NOTE: LOW = key pressed
-  if (digitalRead(COL0) == LOW) freq = FREQ_A3;
-  if (digitalRead(COL1) == LOW) freq = FREQ_A5;
+  // LOW = key pressed
+  if (digitalRead(COL0) == LOW) {
+    freq = FREQ_A3;
+  } 
+  else if (digitalRead(COL1) == LOW) {
+    freq = FREQ_A5;
+  }
 
   digitalWrite(ROW0, HIGH);
 
