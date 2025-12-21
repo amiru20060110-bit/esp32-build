@@ -1,10 +1,42 @@
 #include <driver/i2s.h>
+#include <math.h>
 
 #define I2S_BCLK 1
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
 #define SAMPLE_RATE 44100
+
+// ===== SONG DATA =====
+const float melody[] = {
+  262, 262, 392, 392, 440, 440, 392,   // Twinkle
+  349, 349, 330, 330, 294, 294, 262,
+  392, 392, 349, 349, 330, 330, 294,
+  392, 392, 349, 349, 330, 330, 294,
+  262, 262, 392, 392, 440, 440, 392,
+  349, 349, 330, 330, 294, 294, 262
+};
+
+const int noteDurations[] = {
+  400,400,400,400,400,400,800,
+  400,400,400,400,400,400,800,
+  400,400,400,400,400,400,800,
+  400,400,400,400,400,400,800,
+  400,400,400,400,400,400,800,
+  400,400,400,400,400,400,1000
+};
+
+int noteIndex = 0;
+unsigned long noteStart = 0;
+
+// ===== SYNTH =====
+float phase = 0;
+float env = 0;
+float lp = 0;
+
+inline float squareWave(float p) {
+  return (sinf(p) > 0) ? 1.0f : -1.0f;
+}
 
 void setup() {
   i2s_config_t i2s_config = {
@@ -29,14 +61,42 @@ void setup() {
 
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pin_config);
-
-  // Clear any garbage in DMA
   i2s_zero_dma_buffer(I2S_NUM_0);
+
+  noteStart = millis();
 }
 
 void loop() {
-  int16_t silence = 0;
   size_t bw;
 
-  i2s_write(I2S_NUM_0, &silence, sizeof(silence), &bw, portMAX_DELAY);
+  // Move to next note
+  if (millis() - noteStart > noteDurations[noteIndex]) {
+    noteIndex++;
+    if (noteIndex >= (sizeof(melody) / sizeof(float))) {
+      noteIndex = 0; // loop song
+    }
+    noteStart = millis();
+    env = 0; // retrigger envelope
+    phase = 0;
+  }
+
+  float freq = melody[noteIndex];
+
+  // Envelope (organ style)
+  if (env < 1.0f) env += 0.002f;
+
+  // Phase
+  phase += 2 * PI * freq / SAMPLE_RATE;
+  if (phase > 2 * PI) phase -= 2 * PI;
+
+  // Square wave
+  float tone = squareWave(phase);
+
+  // Low-pass filter (smooth, warm)
+  lp += 0.02f * (tone - lp);
+
+  // Output (safe volume)
+  int16_t sample = (int16_t)(lp * env * 6000);
+
+  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
 }
