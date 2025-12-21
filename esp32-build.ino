@@ -1,42 +1,22 @@
 #include <driver/i2s.h>
-#include <math.h>
 
-#define I2S_BCLK 1
-#define I2S_LRC  2
-#define I2S_DOUT 3
+#define I2S_BCLK  1
+#define I2S_LRC   2
+#define I2S_DOUT  3
 
 #define SAMPLE_RATE 44100
+#define AMPLITUDE   26000   //  louder (max safe ≈ 28000)
 
-// ===== SONG DATA =====
-const float melody[] = {
-  262, 262, 392, 392, 440, 440, 392,   // Twinkle
-  349, 349, 330, 330, 294, 294, 262,
-  392, 392, 349, 349, 330, 330, 294,
-  392, 392, 349, 349, 330, 330, 294,
-  262, 262, 392, 392, 440, 440, 392,
-  349, 349, 330, 330, 294, 294, 262
+struct Note {
+  int freq;
+  int duration;
 };
 
-const int noteDurations[] = {
-  400,400,400,400,400,400,800,
-  400,400,400,400,400,400,800,
-  400,400,400,400,400,400,800,
-  400,400,400,400,400,400,800,
-  400,400,400,400,400,400,800,
-  400,400,400,400,400,400,1000
+Note melody[] = {
+  {262, 400}, {294, 400}, {330, 400}, {349, 400},
+  {392, 400}, {440, 400}, {494, 400}, {523, 800},
+  {0,   400}
 };
-
-int noteIndex = 0;
-unsigned long noteStart = 0;
-
-// ===== SYNTH =====
-float phase = 0;
-float env = 0;
-float lp = 0;
-
-inline float squareWave(float p) {
-  return (sinf(p) > 0) ? 1.0f : -1.0f;
-}
 
 void setup() {
   i2s_config_t i2s_config = {
@@ -45,7 +25,7 @@ void setup() {
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .intr_alloc_flags = 0,
     .dma_buf_count = 8,
     .dma_buf_len = 256,
     .use_apll = true,
@@ -61,42 +41,33 @@ void setup() {
 
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pin_config);
-  i2s_zero_dma_buffer(I2S_NUM_0);
+}
 
-  noteStart = millis();
+void playSquare(int freq, int durationMs) {
+  if (freq == 0) {
+    delay(durationMs);
+    return;
+  }
+
+  int samples = SAMPLE_RATE * durationMs / 1000;
+  int period = SAMPLE_RATE / freq;
+
+  int16_t buffer[256];
+  size_t bytes_written;
+
+  for (int i = 0; i < samples; i += 256) {
+    for (int j = 0; j < 256; j++) {
+      int phase = (i + j) % period;
+      buffer[j] = (phase < period / 2) ? AMPLITUDE : -AMPLITUDE;
+    }
+    i2s_write(I2S_NUM_0, buffer, sizeof(buffer), &bytes_written, portMAX_DELAY);
+  }
 }
 
 void loop() {
-  size_t bw;
-
-  // Move to next note
-  if (millis() - noteStart > noteDurations[noteIndex]) {
-    noteIndex++;
-    if (noteIndex >= (sizeof(melody) / sizeof(float))) {
-      noteIndex = 0; // loop song
-    }
-    noteStart = millis();
-    env = 0; // retrigger envelope
-    phase = 0;
+  for (int i = 0; i < sizeof(melody) / sizeof(Note); i++) {
+    playSquare(melody[i].freq, melody[i].duration);
+    delay(40);
   }
-
-  float freq = melody[noteIndex];
-
-  // Envelope (organ style)
-  if (env < 1.0f) env += 0.002f;
-
-  // Phase
-  phase += 2 * PI * freq / SAMPLE_RATE;
-  if (phase > 2 * PI) phase -= 2 * PI;
-
-  // Square wave
-  float tone = squareWave(phase);
-
-  // Low-pass filter (smooth, warm)
-  lp += 0.02f * (tone - lp);
-
-  // Output (safe volume)
-  int16_t sample = (int16_t)(lp * env * 6000);
-
-  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
+  delay(2000);
 }
