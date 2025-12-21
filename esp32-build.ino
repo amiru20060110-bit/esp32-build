@@ -1,23 +1,10 @@
 #include <driver/i2s.h>
-#include <math.h>
 
 #define I2S_BCLK 1
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
 #define SAMPLE_RATE 44100
-#define NOTE_FREQ 220.0f
-
-float p1 = 0, p2 = 0;
-float env = 0;
-
-float lp = 0;
-float dc_prev = 0;
-float dc_out = 0;
-
-inline float softSquare(float phase) {
-  return tanh(sinf(phase) * 2.5f);
-}
 
 void setup() {
   i2s_config_t i2s_config = {
@@ -42,31 +29,14 @@ void setup() {
 
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pin_config);
+
+  // Clear any garbage in DMA
   i2s_zero_dma_buffer(I2S_NUM_0);
 }
 
 void loop() {
+  int16_t silence = 0;
   size_t bw;
 
-  if (env < 1.0f) env += 0.0004f;
-
-  p1 += 2 * PI * NOTE_FREQ / SAMPLE_RATE;
-  p2 += 2 * PI * (NOTE_FREQ * 1.005f) / SAMPLE_RATE;
-
-  if (p1 > 2 * PI) p1 -= 2 * PI;
-  if (p2 > 2 * PI) p2 -= 2 * PI;
-
-  float tone =
-    softSquare(p1) * 0.7f +
-    softSquare(p2) * 0.3f;
-
-  lp += 0.02f * (tone - lp);
-
-  dc_out = lp - dc_prev + 0.995f * dc_out;
-  dc_prev = lp;
-
-  //  50% volume (was 14000, now 7000)
-  int16_t sample = (int16_t)(dc_out * env * 7000);
-
-  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
+  i2s_write(I2S_NUM_0, &silence, sizeof(silence), &bw, portMAX_DELAY);
 }
