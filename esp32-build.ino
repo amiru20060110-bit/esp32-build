@@ -23,8 +23,8 @@
 #define WAV_HEADER_SIZE 44
 #define BUFFER_SAMPLES 256
 
-// Pitch shifting factor for new key (example: A4 = half step below AS4)
-#define PITCH_SHIFT 0.94387f  // e.g., A4 from AS4
+// Pitch shifting factor for new key (A4 = half step below AS4)
+#define PITCH_SHIFT 0.94387f  // AS4 -> A4
 
 const uint8_t* current_wav = nullptr;
 uint32_t wav_size = 0;
@@ -75,6 +75,7 @@ void setup() {
 void loop() {
   // Scan keys (row->column)
   current_wav = nullptr;
+  bool pitch_key_pressed = false;
 
   // AS4
   digitalWrite(ROW_AS4, LOW);
@@ -104,11 +105,12 @@ void loop() {
   digitalWrite(ROW_C5, HIGH);
 
   // New pitch-shift key
-  digitalWrite(ROW_AS4, LOW); // we use AS4 WAV for pitch shift
+  digitalWrite(ROW_AS4, LOW); // use AS4 WAV for pitch shift
   delayMicroseconds(3);
   if (digitalRead(COL1) == LOW) {
     current_wav = synas4; // use AS4 sample
     wav_size = sizeof(synas4);
+    pitch_key_pressed = true;
   }
   digitalWrite(ROW_AS4, HIGH);
 
@@ -134,12 +136,19 @@ void loop() {
     }
 
     int idx = (int)wav_pos;
-    int16_t s = (int16_t)(current_wav[idx] | (current_wav[idx + 1] << 8));
-    buffer[samples++] = s;
+    float frac = wav_pos - idx;
 
-    // Apply pitch shift if pitch-shift column
-    if (digitalRead(COL1) == LOW) {
-      wav_pos += PITCH_SHIFT * 2.0f;
+    int16_t s0 = (int16_t)(current_wav[idx] | (current_wav[idx + 1] << 8));
+    int16_t s1 = (int16_t)(current_wav[idx + 2] | (current_wav[idx + 3] << 8));
+
+    // Linear interpolation
+    int16_t sample = s0 + (int16_t)((s1 - s0) * frac);
+
+    buffer[samples++] = sample;
+
+    // Apply pitch shift only for pitch-shift key
+    if (pitch_key_pressed) {
+      wav_pos += 2.0f * PITCH_SHIFT;
     } else {
       wav_pos += 2.0f;
     }
