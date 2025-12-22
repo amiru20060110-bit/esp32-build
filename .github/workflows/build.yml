@@ -16,14 +16,10 @@ jobs:
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v1
 
-      - name: Verify Arduino CLI
-        run: arduino-cli version
-
       - name: Configure Arduino CLI
         run: |
           arduino-cli config init
           arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-          # Set data directory to a predictable spot in the workspace
           arduino-cli config set directories.data $GITHUB_WORKSPACE/.arduino
 
       - name: Install ESP32 core
@@ -31,20 +27,15 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile sketch for ESP32-S3 N16R8
+      - name: Compile sketch
         run: |
-          # 1. Dynamically find the partitions folder inside the installed core
+          # Find the internal partitions folder
           PARTITION_DIR=$(find $GITHUB_WORKSPACE/.arduino/packages/esp32/hardware/esp32 -name "partitions" -type d | head -n 1)
           
-          # 2. Copy your repo's partition.csv into that internal folder
-          # We name it 'custom.csv' to satisfy the build property requirement
+          # Copy your repo's partition.csv to the internal folder
           cp partition.csv "$PARTITION_DIR/custom.csv"
           
-          # 3. Create build directory
           mkdir -p build
-          
-          # 4. Run the compile command
-          # build.partitions=custom tells the compiler to use custom.csv
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             --build-property build.flash_size=16MB \
@@ -53,7 +44,7 @@ jobs:
             --output-dir build \
             esp32-build.ino
 
-      - name: Upload firmware artifact
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: esp32-s3-firmware
