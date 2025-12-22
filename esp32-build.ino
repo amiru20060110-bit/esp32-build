@@ -1,122 +1,87 @@
-#include <driver/i2s.h>
-#include "synas4.h"  // A#4
-#include "synds4.h"  // D#4
-#include "sync5.h"   // C5
+#include <Arduino.h>
+#include "synas4.h"   // AS4 recorded WAV
+#include "sync5.h"    // C5 recorded WAV
+#include "synds4.h"   // D#4 recorded WAV
 
-// ===== I2S =====
-#define I2S_BCLK 1
-#define I2S_LRC  2
-#define I2S_DOUT 3
+// Pin setup for 4x4 matrix (row -> column diode orientation)
+const uint8_t rowPins[4] = {15, 16, 17, 18};  // Rows
+const uint8_t colPins[4] = {21, 22, 23, 24};  // Columns
 
+// Audio configuration
 #define SAMPLE_RATE 44100
 #define VOLUME 12000
 
-// ===== MATRIX =====
-const int ROWS[] = {15, 16, 17, 18};
-const int COLS[] = {21, 22, 23, 24};
-#define NUM_ROWS 4
-#define NUM_COLS 4  // 16 possible, we use 13 keys
-
-// WAV data pointers
-struct Note {
-  const byte* data;
-  size_t len;
-};
-Note notes[13];
-
-// Pitch shift multipliers for other keys (C4→C5)
-const float pitches[13] = {
-  0.5f,   // C4 (C5 * 0.5)
-  0.53f,  // C#4
-  0.56f,  // D4
-  0.59f,  // D#4 -> already have synds4
-  0.63f,  // E4
-  0.667f, // F4
-  0.707f, // F#4
-  0.75f,  // G4
-  0.793f, // G#4
-  0.84f,  // A4
-  0.89f,  // A#4 -> already have synas4
-  0.943f, // B4
-  1.0f    // C5 -> already have sync5
+// Struct for a key
+struct Key {
+  const byte* wav;    // Pointer to WAV array in PROGMEM
+  float pitch;        // Pitch multiplier for pitch-shifted keys
 };
 
-float phase = 0;
-int activeKey = -1;
-size_t wavPos = 0;
+// Full octave: C4 → C5 (white + black keys, 13 keys)
+Key keys[13] = {
+  {synas4, 0.667f},   // C4 (pitch-shifted from AS4)
+  {synas4, 0.707f},   // C#4 / Db4
+  {synas4, 0.75f},    // D4
+  {synds4, 1.0f},     // D#4 (already recorded)
+  {synas4, 0.84f},    // E4
+  {synas4, 0.889f},   // F4
+  {synas4, 0.943f},   // F#4 / Gb4
+  {sync5, 0.933f},    // G4 (pitch-shifted from C5)
+  {synas4, 1.0f},     // G#4 / Ab4
+  {sync5, 1.0f},      // A4 (pitch-shifted from C5)
+  {synds4, 1.25f},    // A#4 (already recorded)
+  {sync5, 1.122f},    // B4
+  {sync5, 1.189f}     // C5 (already recorded)
+};
 
-// ===== I2S =====
-void i2sInit() {
-  i2s_config_t cfg = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-    .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_I2S,
-    .dma_buf_count = 8,
-    .dma_buf_len = 256,
-    .use_apll = true,
-    .tx_desc_auto_clear = true
-  };
-  i2s_pin_config_t pins = {
-    .bck_io_num = I2S_BCLK,
-    .ws_io_num = I2S_LRC,
-    .data_out_num = I2S_DOUT,
-    .data_in_num = I2S_PIN_NO_CHANGE
-  };
-  i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
-  i2s_set_pin(I2S_NUM_0, &pins);
-}
+// Variables for scanning matrix
+bool keyState[4][4];
 
 void setup() {
-  // Matrix setup
-  for (int r = 0; r < NUM_ROWS; r++) {
-    pinMode(ROWS[r], OUTPUT);
-    digitalWrite(ROWS[r], HIGH);
-  }
-  for (int c = 0; c < NUM_COLS; c++) pinMode(COLS[c], INPUT_PULLDOWN);
+  Serial.begin(115200);
 
-  // Notes setup
-  notes[0]  = {sync5, sizeof(sync5)};   // C5
-  notes[1]  = {sync5, sizeof(sync5)};   // C#4 (pitch shift)
-  notes[2]  = {sync5, sizeof(sync5)};   // D4
-  notes[3]  = {synds4, sizeof(synds4)}; // D#4
-  notes[4]  = {sync5, sizeof(sync5)};   // E4
-  notes[5]  = {sync5, sizeof(sync5)};   // F4
-  notes[6]  = {sync5, sizeof(sync5)};   // F#4
-  notes[7]  = {sync5, sizeof(sync5)};   // G4
-  notes[8]  = {sync5, sizeof(sync5)};   // G#4
-  notes[9]  = {sync5, sizeof(sync5)};   // A4
-  notes[10] = {synas4, sizeof(synas4)}; // A#4
-  notes[11] = {sync5, sizeof(sync5)};   // B4
-  notes[12] = {sync5, sizeof(sync5)};   // C5
-  i2sInit();
+  // Configure row pins as OUTPUT
+  for (int i = 0; i < 4; i++) {
+    pinMode(rowPins[i], OUTPUT);
+    digitalWrite(rowPins[i], HIGH); // idle HIGH
+  }
+
+  // Configure column pins as INPUT_PULLUP
+  for (int i = 0; i < 4; i++) {
+    pinMode(colPins[i], INPUT_PULLUP);
+  }
+
+  Serial.println("Keyboard ready!");
 }
 
 void loop() {
-  size_t bw;
+  for (int row = 0; row < 4; row++) {
+    digitalWrite(rowPins[row], LOW);  // Activate row
+    for (int col = 0; col < 4; col++) {
+      bool pressed = digitalRead(colPins[col]) == LOW;
 
-  // Scan matrix
-  activeKey = -1;
-  for (int r = 0; r < NUM_ROWS; r++) {
-    digitalWrite(ROWS[r], LOW);
-    delayMicroseconds(3);
-    for (int c = 0; c < NUM_COLS; c++) {
-      int idx = r * NUM_COLS + c;
-      if (idx >= 13) break; // only 13 keys
-      if (digitalRead(COLS[c]) == LOW) activeKey = idx;
+      if (pressed && !keyState[row][col]) {
+        keyState[row][col] = true;
+
+        // Map row/col to key index (0-12)
+        int keyIndex = row * 4 + col;
+        if (keyIndex < 13) {
+          playWav(keys[keyIndex].wav, keys[keyIndex].pitch);
+        }
+      } else if (!pressed && keyState[row][col]) {
+        keyState[row][col] = false;
+      }
     }
-    digitalWrite(ROWS[r], HIGH);
+    digitalWrite(rowPins[row], HIGH);  // Deactivate row
   }
+}
 
-  // Playback
-  int16_t sample = 0;
-  if (activeKey >= 0) {
-    const Note &n = notes[activeKey];
-    float pitch = pitches[activeKey];
-    wavPos += pitch;
-    if (wavPos >= n.len) wavPos -= n.len;
-    sample = ((int16_t)pgm_read_byte(&n.data[(int)wavPos]) - 128) << 8;
-  }
-  i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
+// Dummy playback function for example
+// You need to use your WAV playback method here
+void playWav(const byte* wav, float pitch) {
+  // Example: just print info
+  Serial.print("Play WAV at pitch: ");
+  Serial.println(pitch);
+  // Actual playback code goes here
+  // Use I2S or DAC to output audio from PROGMEM
 }
