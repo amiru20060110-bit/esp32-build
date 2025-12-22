@@ -10,10 +10,11 @@
 #define I2S_DOUT   3
 
 // ================= MATRIX PINS =================
-const uint8_t ROWS[] = {15, 16, 17};   // AS4, DS4, C5
-const uint8_t COLS[] = {40};           // Shared column pin
-#define NUM_ROWS 3
+// Columns are INPUT_PULLUP
+const uint8_t COLS[] = {40};           // Shared column pin (active HIGH when idle)
+const uint8_t ROWS[] = {15, 16, 17};   // Rows driven active LOW
 #define NUM_COLS 1
+#define NUM_ROWS 3
 
 // ================= AUDIO ====================
 #define SAMPLE_RATE 44100
@@ -29,13 +30,15 @@ size_t currentWavSize = 0;
 void setup() {
   Serial.begin(115200);
 
-  // Matrix setup
-  for (int r = 0; r < NUM_ROWS; r++) {
-    pinMode(ROWS[r], OUTPUT);
-    digitalWrite(ROWS[r], HIGH); // idle HIGH
-  }
+  // Columns as INPUT_PULLUP
   for (int c = 0; c < NUM_COLS; c++) {
     pinMode(COLS[c], INPUT_PULLUP);
+  }
+
+  // Rows as OUTPUT HIGH
+  for (int r = 0; r < NUM_ROWS; r++) {
+    pinMode(ROWS[r], OUTPUT);
+    digitalWrite(ROWS[r], HIGH);
   }
 
   // I2S setup
@@ -61,20 +64,20 @@ void setup() {
   i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pins);
 
-  Serial.println("Keyboard ready with row->column scanning");
+  Serial.println("Keyboard ready with column->row scanning");
 }
 
 // ================= LOOP =====================
 void loop() {
   bool keyPressed = false;
 
-  // Row -> column scanning
-  for (int r = 0; r < NUM_ROWS; r++) {
-    digitalWrite(ROWS[r], LOW);
-    delayMicroseconds(3);  // small delay for stabilization
+  // COLUMN -> ROW scanning
+  for (int c = 0; c < NUM_COLS; c++) {
+    for (int r = 0; r < NUM_ROWS; r++) {
+      digitalWrite(ROWS[r], LOW);       // Drive row LOW
+      delayMicroseconds(3);             // Allow signals to stabilize
 
-    for (int c = 0; c < NUM_COLS; c++) {
-      if (digitalRead(COLS[c]) == LOW) { // active LOW = pressed
+      if (digitalRead(COLS[c]) == LOW) { // Key pressed (current flows from column to row)
         keyPressed = true;
 
         // Map row to WAV
@@ -84,8 +87,9 @@ void loop() {
           case 2: currentWav = sync5;  currentWavSize = sizeof(sync5);  break; // C5
         }
       }
+
+      digitalWrite(ROWS[r], HIGH);      // Reset row to HIGH
     }
-    digitalWrite(ROWS[r], HIGH);
   }
 
   // Start playing if pressed
