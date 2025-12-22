@@ -9,17 +9,16 @@
 #define I2S_LRC    2
 #define I2S_DOUT   3
 
-// ================= KEYS =====================
-#define ROW_AS4  15
-#define ROW_DS4  16
-#define ROW_C5   17
-
-#define COL_KEY  21  // active LOW input for all keys
+// ================= MATRIX PINS =================
+const uint8_t ROWS[] = {15, 16, 17};   // AS4, DS4, C5
+const uint8_t COLS[] = {40};           // Shared column pin
+#define NUM_ROWS 3
+#define NUM_COLS 1
 
 // ================= AUDIO ====================
 #define SAMPLE_RATE 44100
 #define WAV_HEADER_SIZE 44
-#define BUFFER_SAMPLES 256   // small RAM usage
+#define BUFFER_SAMPLES 256
 
 int wav_index = WAV_HEADER_SIZE;
 bool playing = false;
@@ -28,14 +27,18 @@ size_t currentWavSize = 0;
 
 // ================= SETUP ====================
 void setup() {
-  // ---- Matrix (keys) ----
-  pinMode(ROW_AS4, OUTPUT); digitalWrite(ROW_AS4, HIGH);
-  pinMode(ROW_DS4, OUTPUT); digitalWrite(ROW_DS4, HIGH);
-  pinMode(ROW_C5,  OUTPUT); digitalWrite(ROW_C5, HIGH);
+  Serial.begin(115200);
 
-  pinMode(COL_KEY, INPUT_PULLUP);
+  // Matrix setup
+  for (int r = 0; r < NUM_ROWS; r++) {
+    pinMode(ROWS[r], OUTPUT);
+    digitalWrite(ROWS[r], HIGH); // idle HIGH
+  }
+  for (int c = 0; c < NUM_COLS; c++) {
+    pinMode(COLS[c], INPUT_PULLUP);
+  }
 
-  // ---- I2S ----
+  // I2S setup
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
@@ -57,44 +60,35 @@ void setup() {
 
   i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pins);
+
+  Serial.println("Keyboard ready with row->column scanning");
 }
 
 // ================= LOOP =====================
 void loop() {
-  // ---- Scan keys ----
   bool keyPressed = false;
 
-  // AS4 key
-  digitalWrite(ROW_AS4, LOW);
-  delayMicroseconds(3);
-  if (digitalRead(COL_KEY) == LOW) {
-    keyPressed = true;
-    currentWav = synas4;
-    currentWavSize = sizeof(synas4);
-  }
-  digitalWrite(ROW_AS4, HIGH);
+  // Row -> column scanning
+  for (int r = 0; r < NUM_ROWS; r++) {
+    digitalWrite(ROWS[r], LOW);
+    delayMicroseconds(3);  // small delay for stabilization
 
-  // DS4 key
-  digitalWrite(ROW_DS4, LOW);
-  delayMicroseconds(3);
-  if (!keyPressed && digitalRead(COL_KEY) == LOW) {
-    keyPressed = true;
-    currentWav = synds4;
-    currentWavSize = sizeof(synds4);
-  }
-  digitalWrite(ROW_DS4, HIGH);
+    for (int c = 0; c < NUM_COLS; c++) {
+      if (digitalRead(COLS[c]) == LOW) { // active LOW = pressed
+        keyPressed = true;
 
-  // C5 key
-  digitalWrite(ROW_C5, LOW);
-  delayMicroseconds(3);
-  if (!keyPressed && digitalRead(COL_KEY) == LOW) {
-    keyPressed = true;
-    currentWav = sync5;
-    currentWavSize = sizeof(sync5);
+        // Map row to WAV
+        switch (r) {
+          case 0: currentWav = synas4; currentWavSize = sizeof(synas4); break; // AS4
+          case 1: currentWav = synds4; currentWavSize = sizeof(synds4); break; // DS4
+          case 2: currentWav = sync5;  currentWavSize = sizeof(sync5);  break; // C5
+        }
+      }
+    }
+    digitalWrite(ROWS[r], HIGH);
   }
-  digitalWrite(ROW_C5, HIGH);
 
-  // ---- Start playing if pressed ----
+  // Start playing if pressed
   if (keyPressed && !playing) {
     wav_index = WAV_HEADER_SIZE;  // skip WAV header
     playing = true;
@@ -104,7 +98,7 @@ void loop() {
     playing = false;
   }
 
-  // ---- Play WAV ----
+  // Play WAV
   if (!playing) return;
 
   int16_t buffer[BUFFER_SAMPLES];
