@@ -23,23 +23,23 @@ jobs:
         run: |
           arduino-cli config init
           arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-    arduino-cli config set directories.data $GITHUB_WORKSPACE/.arduino
+          arduino-cli config set directories.data $GITHUB_WORKSPACE/.arduino
 
       - name: Install ESP32 core
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-- name: Compile sketch for ESP32-S3 N16R8
-  run: |
-    mkdir -p build
-    arduino-cli compile \
-      --fqbn esp32:esp32:esp32s3 \
-      --build-property build.flash_size=16MB \
-      --build-property build.psram=opi \
-      --build-property build.partitions=partitions_16MB_14MBAPP.csv \
-      --output-dir build \
-      esp32-build.ino
+      - name: Compile sketch for ESP32-S3 N16R8
+        run: |
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --build-property build.flash_size=16MB \
+            --build-property build.psram=opi \
+            --build-property build.partitions=partitions_16MB_14MBAPP.csv \
+            --output-dir build \
+            esp32-build.ino
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
