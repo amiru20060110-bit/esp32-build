@@ -23,6 +23,7 @@ jobs:
         run: |
           arduino-cli config init
           arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+    arduino-cli config set directories.data $GITHUB_WORKSPACE/.arduino
 
       - name: Install ESP32 core
         run: |
