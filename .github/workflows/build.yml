@@ -33,19 +33,18 @@ jobs:
 
       - name: Compile sketch for ESP32-S3 N16R8
         run: |
-          # 1. Identify the version-specific path for the ESP32 hardware tools
-          # This looks into the .arduino folder we configured earlier
-          ESP32_PATH=$GITHUB_WORKSPACE/.arduino/packages/esp32/hardware/esp32/$(ls $GITHUB_WORKSPACE/.arduino/packages/esp32/hardware/esp32/)
+          # 1. Dynamically find the partitions folder inside the installed core
+          PARTITION_DIR=$(find $GITHUB_WORKSPACE/.arduino/packages/esp32/hardware/esp32 -name "partitions" -type d | head -n 1)
           
-          # 2. Copy your repo's partition.csv into the internal compiler tools directory
-          # We name it 'custom.csv' to avoid any naming conflicts
-          cp partition.csv $ESP32_PATH/tools/partitions/custom.csv
+          # 2. Copy your repo's partition.csv into that internal folder
+          # We name it 'custom.csv' to satisfy the build property requirement
+          cp partition.csv "$PARTITION_DIR/custom.csv"
           
           # 3. Create build directory
           mkdir -p build
           
           # 4. Run the compile command
-          # Note: build.partitions points to 'custom' (the filename without .csv)
+          # build.partitions=custom tells the compiler to use custom.csv
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             --build-property build.flash_size=16MB \
