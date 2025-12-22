@@ -1,69 +1,52 @@
 #include <driver/i2s.h>
-#include <math.h>
+#include "synas4.h"  // A#4
+#include "synds4.h"  // D#4
+#include "sync5.h"   // C5
 
-// ================= I2S =================
-#define I2S_BCLK  1
-#define I2S_LRC   2
-#define I2S_DOUT  3
+// ===== I2S =====
+#define I2S_BCLK 1
+#define I2S_LRC  2
+#define I2S_DOUT 3
 
 #define SAMPLE_RATE 44100
 #define VOLUME 12000
 
-// ================= MATRIX =================
-const int rowPins[4] = {15, 16, 17, 18};
-const int colPins[4] = {21, 22, 23, 24};
+// ===== MATRIX =====
+const int ROWS[] = {15, 16, 17, 18};
+const int COLS[] = {21, 22, 23, 24};
+#define NUM_ROWS 4
+#define NUM_COLS 4  // 16 possible, we use 13 keys
 
-// ================= WAV DATA =================
-// (replace with your actual PROGMEM arrays)
-extern const int16_t c5_wav[];
-extern const uint32_t c5_len;
+// WAV data pointers
+struct Note {
+  const byte* data;
+  size_t len;
+};
+Note notes[13];
 
-extern const int16_t ds4_wav[];
-extern const uint32_t ds4_len;
-
-extern const int16_t as4_wav[];
-extern const uint32_t as4_len;
-
-// ================= KEY TABLE =================
-struct Key {
-  const int16_t* data;
-  uint32_t len;
-  float pitch;
+// Pitch shift multipliers for other keys (C4→C5)
+const float pitches[13] = {
+  0.5f,   // C4 (C5 * 0.5)
+  0.53f,  // C#4
+  0.56f,  // D4
+  0.59f,  // D#4 -> already have synds4
+  0.63f,  // E4
+  0.667f, // F4
+  0.707f, // F#4
+  0.75f,  // G4
+  0.793f, // G#4
+  0.84f,  // A4
+  0.89f,  // A#4 -> already have synas4
+  0.943f, // B4
+  1.0f    // C5 -> already have sync5
 };
 
-Key keys[13] = {
-  {ds4_wav, ds4_len, pow(2, -3/12.0)}, // C4
-  {ds4_wav, ds4_len, pow(2, -2/12.0)}, // C#4
-  {ds4_wav, ds4_len, pow(2, -1/12.0)}, // D4
-  {ds4_wav, ds4_len, 1.0},             // D#4
-  {ds4_wav, ds4_len, pow(2,  1/12.0)}, // E4
-
-  {as4_wav, as4_len, pow(2, -5/12.0)}, // F4
-  {as4_wav, as4_len, pow(2, -4/12.0)}, // F#4
-  {as4_wav, as4_len, pow(2, -3/12.0)}, // G4
-  {as4_wav, as4_len, pow(2, -2/12.0)}, // G#4
-  {as4_wav, as4_len, pow(2, -1/12.0)}, // A4
-  {as4_wav, as4_len, 1.0},             // A#4
-
-  {c5_wav,  c5_len,  pow(2, -1/12.0)}, // B4
-  {c5_wav,  c5_len,  1.0},             // C5
-};
-
-int activeKey = -1;
 float phase = 0;
+int activeKey = -1;
+size_t wavPos = 0;
 
-// ================= SETUP =================
-void setup() {
-  // Matrix
-  for (int r = 0; r < 4; r++) {
-    pinMode(rowPins[r], OUTPUT);
-    digitalWrite(rowPins[r], HIGH);
-  }
-  for (int c = 0; c < 4; c++) {
-    pinMode(colPins[c], INPUT_PULLUP);
-  }
-
-  // I2S
+// ===== I2S =====
+void i2sInit() {
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
@@ -75,56 +58,65 @@ void setup() {
     .use_apll = true,
     .tx_desc_auto_clear = true
   };
-
   i2s_pin_config_t pins = {
     .bck_io_num = I2S_BCLK,
-    .ws_io_num  = I2S_LRC,
+    .ws_io_num = I2S_LRC,
     .data_out_num = I2S_DOUT,
-    .data_in_num  = I2S_PIN_NO_CHANGE
+    .data_in_num = I2S_PIN_NO_CHANGE
   };
-
   i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pins);
 }
 
-// ================= LOOP =================
-void loop() {
-  scanKeys();
-  playAudio();
-}
-
-// ================= MATRIX SCAN =================
-void scanKeys() {
-  activeKey = -1;
-  int keyIndex = 0;
-
-  for (int r = 0; r < 4; r++) {
-    digitalWrite(rowPins[r], LOW);
-    delayMicroseconds(3);
-
-    for (int c = 0; c < 4; c++) {
-      if (digitalRead(colPins[c]) == LOW && keyIndex < 13) {
-        activeKey = keyIndex;
-        digitalWrite(rowPins[r], HIGH);
-        return;
-      }
-      keyIndex++;
-    }
-    digitalWrite(rowPins[r], HIGH);
+void setup() {
+  // Matrix setup
+  for (int r = 0; r < NUM_ROWS; r++) {
+    pinMode(ROWS[r], OUTPUT);
+    digitalWrite(ROWS[r], HIGH);
   }
+  for (int c = 0; c < NUM_COLS; c++) pinMode(COLS[c], INPUT_PULLDOWN);
+
+  // Notes setup
+  notes[0]  = {sync5, sizeof(sync5)};   // C5
+  notes[1]  = {sync5, sizeof(sync5)};   // C#4 (pitch shift)
+  notes[2]  = {sync5, sizeof(sync5)};   // D4
+  notes[3]  = {synds4, sizeof(synds4)}; // D#4
+  notes[4]  = {sync5, sizeof(sync5)};   // E4
+  notes[5]  = {sync5, sizeof(sync5)};   // F4
+  notes[6]  = {sync5, sizeof(sync5)};   // F#4
+  notes[7]  = {sync5, sizeof(sync5)};   // G4
+  notes[8]  = {sync5, sizeof(sync5)};   // G#4
+  notes[9]  = {sync5, sizeof(sync5)};   // A4
+  notes[10] = {synas4, sizeof(synas4)}; // A#4
+  notes[11] = {sync5, sizeof(sync5)};   // B4
+  notes[12] = {sync5, sizeof(sync5)};   // C5
+  i2sInit();
 }
 
-// ================= AUDIO =================
-void playAudio() {
-  int16_t sample = 0;
+void loop() {
   size_t bw;
 
-  if (activeKey >= 0) {
-    Key &k = keys[activeKey];
-    phase += k.pitch;
-    if (phase >= k.len) phase -= k.len;
-    sample = k.data[(int)phase];
+  // Scan matrix
+  activeKey = -1;
+  for (int r = 0; r < NUM_ROWS; r++) {
+    digitalWrite(ROWS[r], LOW);
+    delayMicroseconds(3);
+    for (int c = 0; c < NUM_COLS; c++) {
+      int idx = r * NUM_COLS + c;
+      if (idx >= 13) break; // only 13 keys
+      if (digitalRead(COLS[c]) == LOW) activeKey = idx;
+    }
+    digitalWrite(ROWS[r], HIGH);
   }
 
+  // Playback
+  int16_t sample = 0;
+  if (activeKey >= 0) {
+    const Note &n = notes[activeKey];
+    float pitch = pitches[activeKey];
+    wavPos += pitch;
+    if (wavPos >= n.len) wavPos -= n.len;
+    sample = ((int16_t)pgm_read_byte(&n.data[(int)wavPos]) - 128) << 8;
+  }
   i2s_write(I2S_NUM_0, &sample, sizeof(sample), &bw, portMAX_DELAY);
 }
