@@ -37,7 +37,7 @@ jobs:
             --fqbn esp32:esp32:esp32s3 \
             --build-property build.flash_size=16MB \
             --build-property build.psram=opi \
-            --build-property build.partitions=$GITHUB_WORKSPACE/partition.csv \
+            --build-property build.partitions=$GITHUB_WORKSPACE/partition \
             --output-dir build \
             esp32-build.ino
 
