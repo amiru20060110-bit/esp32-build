@@ -1,47 +1,52 @@
 #include <Arduino.h>
 #include <driver/i2s.h>
 
-#include "synas4.h"   // AS4
-#include "synds4.h"   // DS4
-#include "sync5.h"    // C5
+#include "synas4.h"  // AS4
+#include "synds4.h"  // DS4
+#include "sync5.h"   // C5
 
-// ================= I2S =================
-#define I2S_BCLK   1
-#define I2S_LRC    2
-#define I2S_DOUT   3
+// ===== I2S PINS =====
+#define I2S_BCLK 1
+#define I2S_LRC  2
+#define I2S_DOUT 3
 
-// ================= MATRIX =================
-// Column -> Row diode orientation
-// Rows active-LOW, Columns INPUT_PULLUP
+// ===== MATRIX PINS =====
+#define COL0 40   // original key column
+#define COL1 41   // new pitch-shift key
 
-#define ROW0  15
+#define ROW_AS4 15
+#define ROW_DS4 16
+#define ROW_C5  17
 
-#define COL0  40   // AS4
-#define COL1  41   // DS4
-#define COL2  42   // C5
-
-// ================= AUDIO =================
-#define SAMPLE_RATE     44100
+// ===== AUDIO =====
+#define SAMPLE_RATE 44100
 #define WAV_HEADER_SIZE 44
-#define BUFFER_SAMPLES  256
+#define BUFFER_SAMPLES 256
 
-// ================= STATE =================
-const uint8_t* currentWav = nullptr;
-uint32_t wavSize = 0;
-uint32_t wavIndex = WAV_HEADER_SIZE;
+// Pitch shifting factor for new key (example: A4 = half step below AS4)
+#define PITCH_SHIFT 0.94387f  // e.g., A4 from AS4
+
+const uint8_t* current_wav = nullptr;
+uint32_t wav_size = 0;
+float wav_pos = WAV_HEADER_SIZE;
 bool playing = false;
 
-// ================= SETUP =================
+// ===== SETUP =====
 void setup() {
-  // ---- Matrix ----
-  pinMode(ROW0, OUTPUT);
-  digitalWrite(ROW0, HIGH);
-
+  // Columns
   pinMode(COL0, INPUT_PULLUP);
   pinMode(COL1, INPUT_PULLUP);
-  pinMode(COL2, INPUT_PULLUP);
 
-  // ---- I2S ----
+  // Rows
+  pinMode(ROW_AS4, OUTPUT);
+  pinMode(ROW_DS4, OUTPUT);
+  pinMode(ROW_C5, OUTPUT);
+
+  digitalWrite(ROW_AS4, HIGH);
+  digitalWrite(ROW_DS4, HIGH);
+  digitalWrite(ROW_C5, HIGH);
+
+  // I2S
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
@@ -56,73 +61,90 @@ void setup() {
   };
 
   i2s_pin_config_t pins = {
-    .bck_io_num   = I2S_BCLK,
-    .ws_io_num    = I2S_LRC,
+    .bck_io_num = I2S_BCLK,
+    .ws_io_num = I2S_LRC,
     .data_out_num = I2S_DOUT,
-    .data_in_num  = I2S_PIN_NO_CHANGE
+    .data_in_num = I2S_PIN_NO_CHANGE
   };
 
   i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pins);
 }
 
-// ================= LOOP =================
+// ===== LOOP =====
 void loop() {
-  // ---- Scan row ----
-  digitalWrite(ROW0, LOW);
+  // Scan keys (row->column)
+  current_wav = nullptr;
+
+  // AS4
+  digitalWrite(ROW_AS4, LOW);
   delayMicroseconds(3);
-
-  bool k0 = (digitalRead(COL0) == LOW);
-  bool k1 = (digitalRead(COL1) == LOW);
-  bool k2 = (digitalRead(COL2) == LOW);
-
-  digitalWrite(ROW0, HIGH);
-
-  // ---- Key select (priority) ----
-  if (k0) {
-    if (currentWav != synas4) {
-      currentWav = synas4;
-      wavSize = sizeof(synas4);
-      wavIndex = WAV_HEADER_SIZE;
-    }
-    playing = true;
+  if (digitalRead(COL0) == LOW) {
+    current_wav = synas4;
+    wav_size = sizeof(synas4);
   }
-  else if (k1) {
-    if (currentWav != synds4) {
-      currentWav = synds4;
-      wavSize = sizeof(synds4);
-      wavIndex = WAV_HEADER_SIZE;
-    }
-    playing = true;
+  digitalWrite(ROW_AS4, HIGH);
+
+  // DS4
+  digitalWrite(ROW_DS4, LOW);
+  delayMicroseconds(3);
+  if (digitalRead(COL0) == LOW) {
+    current_wav = synds4;
+    wav_size = sizeof(synds4);
   }
-  else if (k2) {
-    if (currentWav != sync5) {
-      currentWav = sync5;
-      wavSize = sizeof(sync5);
-      wavIndex = WAV_HEADER_SIZE;
-    }
-    playing = true;
+  digitalWrite(ROW_DS4, HIGH);
+
+  // C5
+  digitalWrite(ROW_C5, LOW);
+  delayMicroseconds(3);
+  if (digitalRead(COL0) == LOW) {
+    current_wav = sync5;
+    wav_size = sizeof(sync5);
   }
-  else {
+  digitalWrite(ROW_C5, HIGH);
+
+  // New pitch-shift key
+  digitalWrite(ROW_AS4, LOW); // we use AS4 WAV for pitch shift
+  delayMicroseconds(3);
+  if (digitalRead(COL1) == LOW) {
+    current_wav = synas4; // use AS4 sample
+    wav_size = sizeof(synas4);
+  }
+  digitalWrite(ROW_AS4, HIGH);
+
+  // If no key pressed, do nothing
+  if (!current_wav) {
     playing = false;
     return;
   }
 
-  // ---- Audio streaming (SEAMLESS LOOP) ----
+  // Start playback once
+  if (!playing) {
+    wav_pos = WAV_HEADER_SIZE;
+    playing = true;
+  }
+
   int16_t buffer[BUFFER_SAMPLES];
   int samples = 0;
 
   while (samples < BUFFER_SAMPLES) {
-    if (wavIndex >= wavSize) {
-      wavIndex = WAV_HEADER_SIZE;  // <<< seamless loop FIX
+    // Loop WAV
+    if ((int)wav_pos >= wav_size - 2) {
+      wav_pos = WAV_HEADER_SIZE;
     }
 
-    buffer[samples++] =
-      (int16_t)(currentWav[wavIndex] |
-               (currentWav[wavIndex + 1] << 8));
-    wavIndex += 2;
+    int idx = (int)wav_pos;
+    int16_t s = (int16_t)(current_wav[idx] | (current_wav[idx + 1] << 8));
+    buffer[samples++] = s;
+
+    // Apply pitch shift if pitch-shift column
+    if (digitalRead(COL1) == LOW) {
+      wav_pos += PITCH_SHIFT * 2.0f;
+    } else {
+      wav_pos += 2.0f;
+    }
   }
 
-  size_t bytesWritten;
-  i2s_write(I2S_NUM_0, buffer, samples * 2, &bytesWritten, portMAX_DELAY);
+  size_t bw;
+  i2s_write(I2S_NUM_0, buffer, samples * 2, &bw, portMAX_DELAY);
 }
