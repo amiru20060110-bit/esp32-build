@@ -4,7 +4,7 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
-// SD Card Pins
+// SD Card Pins (SPI)
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
@@ -15,20 +15,23 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (3x3)
-const int colPins[3] = {40, 41, 42};
-const int rowPins[3] = {15, 16, 17};
-const char* soundFiles[3][3] = {
-  {"/16.wav",  "/17.wav",  "/18.wav"},
-  {"/35.wav",  "/ce4.wav", "/60.wav"},
-  {"/61.wav",  "/62.wav",  "/63.wav"}
+// Matrix Config (4x4)
+const int colPins[4] = {40, 41, 42, 22};
+const int rowPins[4] = {15, 16, 17, 21};
+
+// File Mapping (Swapped 40.wav for ce4.wav)
+const char* soundFiles[4][4] = {
+  {"/16.wav", "/17.wav", "/18.wav", "/19.wav"},
+  {"/20.wav", "/21.wav", "/ce4.wav", "/41.wav"},
+  {"/42.wav", "/43.wav", "/44.wav", "/45.wav"},
+  {"/46.wav", "/47.wav", "/48.wav", "/49.wav"}
 };
 
-// Polyphony Config
-#define MAX_VOICES 3
+// Polyphony & Audio Config
+#define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define I2S_NUM I2S_NUM_0
-#define BUF_SIZE 512 // Increased buffer for stability with high-speed SPI
+#define BUF_SIZE 512 
 
 struct Voice {
   File file;
@@ -38,7 +41,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[3][3] = {false}; 
+bool keyStates[4][4] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -74,44 +77,48 @@ void stopVoice(int i) {
 void setup() {
   Serial.begin(115200);
   
-  for (int i = 0; i < 3; i++) {
+  // Matrix Pin Init
+  for (int i = 0; i < 4; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
-  // Optimized SPI Speed for Polyphony (20MHz)
+  // High-speed SPI for polyphony
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS, SPI, 20000000)) { 
-    Serial.println("SD Card Mount Failed!"); 
+    Serial.println("SD initialization failed!"); 
     while(1); 
   }
 
   setupI2S();
-  Serial.println("3-Voice Polyphonic System Ready");
+  Serial.println("System Ready: 4-Voice 4x4 Sampler");
 }
 
 void loop() {
-  // 1. Matrix Scanning
-  for (int c = 0; c < 3; c++) {
+  // 1. Scan Matrix (Column -> Row)
+  for (int c = 0; c < 4; c++) {
     digitalWrite(colPins[c], HIGH);
-    for (int r = 0; r < 3; r++) {
+    for (int r = 0; r < 4; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
+      // Trigger on Press
       if (pressed && !keyStates[r][c]) {
         for (int i = 0; i < MAX_VOICES; i++) {
           if (!voices[i].active) {
             voices[i].file = SD.open(soundFiles[r][c]);
             if (voices[i].file) {
-              voices[i].file.seek(44);
+              voices[i].file.seek(44); // Skip header
               voices[i].active = true;
               voices[i].row = r;
               voices[i].col = c;
+              Serial.printf("Playing: %s on Voice %d\n", soundFiles[r][c], i);
             }
             break; 
           }
         }
       } 
+      // Stop on Release
       else if (!pressed && keyStates[r][c]) {
         for (int i = 0; i < MAX_VOICES; i++) {
           if (voices[i].active && voices[i].row == r && voices[i].col == c) {
@@ -138,17 +145,17 @@ void loop() {
         int samplesRead = bytesRead / 2;
         
         for (int j = 0; j < samplesRead; j++) {
-          // Mix samples using 32-bit math to prevent overflow
+          // Mix with 32-bit math to prevent wrap-around distortion
           int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
           
-          // Clipping Protection (Hard Clamp)
+          // Hard Clamping (Limiting)
           if (mixed > 32767) mixed = 32767;
           else if (mixed < -32768) mixed = -32768;
           
           mixBuf[j] = (int16_t)mixed;
         }
       } else {
-        stopVoice(i);
+        stopVoice(i); // Auto-stop at end of file
       }
     }
   }
@@ -157,6 +164,7 @@ void loop() {
     size_t written;
     i2s_write(I2S_NUM, mixBuf, sizeof(mixBuf), &written, portMAX_DELAY);
   } else {
+    // If no voices are active, ensure the I2S hardware is silent
     i2s_zero_dma_buffer(I2S_NUM);
   }
 }
