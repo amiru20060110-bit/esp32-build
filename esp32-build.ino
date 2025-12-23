@@ -15,24 +15,25 @@
 #define I2S_DOUT 3
 
 // Matrix Config: 6 Columns x 5 Rows
+// Swapped 48 for 38 to avoid the onboard RGB LED
 const int colPins[6] = {33, 34, 40, 41, 42, 38}; 
 const int rowPins[5] = {15, 16, 17, 18, 47}; 
 
 const char* soundFiles[5][6] = {
-  {"/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav", "/30.wav"},
-  {"/31.wav", "/32.wav", "/33.wav", "/34.wav", "/35.wav", "/36.wav"},
-  {"/37.wav", "/38.wav", "/39.wav", "/40.wav", "/41.wav", "/42.wav"},
-  {"/43.wav", "/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav"},
-  {"/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav"}
+  {"/1.wav", "/2.wav", "/3.wav", "/4.wav", "/5.wav", "/6.wav"},
+  {"/7.wav", "/8.wav", "/9.wav", "/10.wav", "/11.wav", "/12.wav"},
+  {"/13.wav", "/14.wav", "/15.wav", "/16.wav", "/17.wav", "/18.wav"},
+  {"/19.wav", "/20.wav", "/21.wav", "/22.wav", "/23.wav", "/24.wav"},
+  {"/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav", "/30.wav"}
 };
 
-// --- Low Latency Settings ---
+// --- Pro-Audio Low Latency Settings ---
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define I2S_NUM I2S_NUM_0
-#define BUF_SIZE 256        // Smaller = Lower Latency
-#define DMA_COUNT 4         // Fewer buffers = faster response
-#define SCAN_DELAY_US 15    // Microseconds to wait for pin settling
+#define BUF_SIZE 256        // Tiny buffer for instant response
+#define DMA_COUNT 4         // Minimal buffering
+#define SCAN_DELAY_US 10    // Fast matrix settling time
 
 struct Voice {
   File file;
@@ -77,9 +78,9 @@ void stopVoice(int i) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  // Serial disabled for speed, enable only for debugging
+  // Serial.begin(115200);
 
-  // Initialize Matrix
   for (int i = 0; i < 6; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
@@ -88,19 +89,17 @@ void setup() {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
-  // SPI at 40MHz for faster SD seeks
+  // SPI overclocked to 40MHz to handle multi-voice reading
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS, SPI, 40000000)) { 
-    Serial.println("SD Speed Fail"); 
     while(1); 
   }
 
   setupI2S();
-  Serial.println("Low Latency 30-Key Sampler Ready");
 }
 
 void loop() {
-  // 1. Matrix Scan (Fast)
+  // 1. Matrix Scan
   for (int c = 0; c < 6; c++) {
     digitalWrite(colPins[c], HIGH);
     delayMicroseconds(SCAN_DELAY_US); 
@@ -113,7 +112,7 @@ void loop() {
           if (!voices[i].active) {
             voices[i].file = SD.open(soundFiles[r][c]);
             if (voices[i].file) {
-              voices[i].file.seek(44); // Skip WAV header
+              voices[i].file.seek(44); // Jump straight to audio data
               voices[i].active = true;
               voices[i].row = r;
               voices[i].col = c;
@@ -134,7 +133,7 @@ void loop() {
     digitalWrite(colPins[c], LOW);
   }
 
-  // 2. Optimized Audio Mixing
+  // 2. High-Speed Audio Mixing
   int16_t mixBuf[BUF_SIZE];
   memset(mixBuf, 0, sizeof(mixBuf));
   bool anyActive = false;
@@ -144,13 +143,12 @@ void loop() {
       if (voices[i].file.available()) {
         anyActive = true;
         int16_t tempBuf[BUF_SIZE];
-        // Read directly into buffer
         size_t bytesRead = voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
         int samplesRead = bytesRead / 2;
         
         for (int j = 0; j < samplesRead; j++) {
           int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
-          // Hard clipping for speed
+          // Optimization: Hard Clipping
           if (mixed > 32767) mixed = 32767;
           else if (mixed < -32768) mixed = -32768;
           mixBuf[j] = (int16_t)mixed;
@@ -161,10 +159,9 @@ void loop() {
     }
   }
 
-  // 3. Write to I2S (Non-blocking)
+  // 3. I2S Write (Zero timeout = No waiting)
   if (anyActive) {
     size_t written;
-    // Timeout set to 0 to keep the loop moving fast
     i2s_write(I2S_NUM, mixBuf, sizeof(mixBuf), &written, 0);
   }
 }
