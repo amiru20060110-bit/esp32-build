@@ -15,16 +15,20 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (5 Columns x 5 Rows = 25 keys)
-const int colPins[5] = {40, 41, 42, 33, 34}; 
-const int rowPins[5] = {15, 16, 17, 18, 38}; 
+// Matrix Config (5 Columns x 7 Rows = 35 keys)
+// Added GPIO 35 to colPins
+const int colPins[5] = {40, 41, 42, 33, 35}; 
+// Rows expanded to 7 (Assuming you are using 15, 16, 17, 18, 38, 39, 48 based on previous safe pins)
+const int rowPins[7] = {15, 16, 17, 18, 38, 39, 48}; 
 
-const char* soundFiles[5][5] = {
+const char* soundFiles[7][5] = {
   {"/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav"},
   {"/21.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav"},
   {"/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav"},
   {"/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav"},
-  {"/54.wav", "/55.wav", "/56.wav", "/57.wav", "/58.wav"}
+  {"/54.wav", "/55.wav", "/56.wav", "/57.wav", "/58.wav"},
+  {"/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
+  {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav"}
 };
 
 // Polyphony & Audio Config
@@ -41,7 +45,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[5][5] = {false}; 
+bool keyStates[7][5] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -76,18 +80,18 @@ void stopVoice(int i) {
 
 void setup() {
   Serial.begin(115200);
-  delay(2000); // Increased delay for system/PSRAM stability
+  delay(2000); 
 
   // Initialize Matrix Pins
   for (int i = 0; i < 5; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
   }
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 7; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
-  // SPI Setup (20MHz for 4-voice streaming)
+  // SPI Setup
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS, SPI, 20000000)) { 
     Serial.println("SD Error!"); 
@@ -95,25 +99,24 @@ void setup() {
   }
 
   setupI2S();
-  Serial.println("System Online: 25-Key / 4-Voice Polyphony");
+  Serial.println("System Online: 35-Key / 4-Voice Polyphony");
 }
 
 void loop() {
-  // 1. Matrix Scanning (Col -> Row)
+  // 1. Matrix Scanning
   for (int c = 0; c < 5; c++) {
     digitalWrite(colPins[c], HIGH);
-    delayMicroseconds(30); // Stabilization delay
+    delayMicroseconds(30); 
     
-    for (int r = 0; r < 5; r++) {
+    for (int r = 0; r < 7; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
       if (pressed && !keyStates[r][c]) {
-        // Find empty voice slot for NEW press
         for (int i = 0; i < MAX_VOICES; i++) {
           if (!voices[i].active) {
             voices[i].file = SD.open(soundFiles[r][c]);
             if (voices[i].file) {
-              voices[i].file.seek(44); // Skip header
+              voices[i].file.seek(44); 
               voices[i].active = true;
               voices[i].row = r;
               voices[i].col = c;
@@ -124,7 +127,6 @@ void loop() {
         }
       } 
       else if (!pressed && keyStates[r][c]) {
-        // Stop specific voice on RELEASE
         for (int i = 0; i < MAX_VOICES; i++) {
           if (voices[i].active && voices[i].row == r && voices[i].col == c) {
             stopVoice(i);
@@ -150,7 +152,6 @@ void loop() {
         int samplesRead = bytesRead / 2;
         
         for (int j = 0; j < samplesRead; j++) {
-          // Summing with 32-bit math and hard-clamping
           int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
           if (mixed > 32767) mixed = 32767;
           else if (mixed < -32768) mixed = -32768;
