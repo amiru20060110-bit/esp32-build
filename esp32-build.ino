@@ -4,7 +4,7 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
-// SD Card Pins
+// SD Card Pins (SPI)
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
@@ -15,9 +15,9 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Pins
-#define ROW_PIN 15
-#define COL_PIN 40
+// Matrix Pins (Updated Logic: Column to Row)
+#define COL_PIN 40  // Now the Output Source
+#define ROW_PIN 15  // Now the Input Sink
 
 // Audio Config
 #define SAMPLE_RATE 32000
@@ -35,7 +35,7 @@ void setupI2S() {
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 8,
-    .dma_buf_len = 512, // Smaller buffer for better responsiveness
+    .dma_buf_len = 512, 
     .use_apll = false
   };
 
@@ -53,10 +53,10 @@ void setupI2S() {
 void setup() {
   Serial.begin(115200);
 
-  // Matrix Setup
-  pinMode(ROW_PIN, OUTPUT);
-  pinMode(COL_PIN, INPUT_PULLDOWN);
-  digitalWrite(ROW_PIN, LOW); // Keep low until scanning
+  // Matrix Setup for Column -> Row
+  pinMode(COL_PIN, OUTPUT);
+  pinMode(ROW_PIN, INPUT_PULLDOWN);
+  digitalWrite(COL_PIN, LOW); // Stay low when not checking
 
   // SD Setup
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
@@ -66,44 +66,39 @@ void setup() {
   }
   
   setupI2S();
-  Serial.println("System Ready. Press Key to play.");
+  Serial.println("Ready. Diode Orientation: Col -> Row");
 }
 
 void loop() {
-  // --- Matrix Scanning ---
-  digitalWrite(ROW_PIN, HIGH);       // Set Row High
-  bool keyPressed = (digitalRead(COL_PIN) == HIGH); // Read Column
-  digitalWrite(ROW_PIN, LOW);        // Set Row back to Low
+  // --- Matrix Scanning (Col -> Row) ---
+  digitalWrite(COL_PIN, HIGH);        // Pulse the Column
+  bool keyPressed = (digitalRead(ROW_PIN) == HIGH); // Check the Row
+  digitalWrite(COL_PIN, LOW);         // Reset Column
 
   if (keyPressed) {
     if (!isPlaying) {
-      // Start playing
       audioFile = SD.open("/ce4.wav");
       if (audioFile) {
-        audioFile.seek(44); // Skip WAV header
+        audioFile.seek(44); // Skip header
         isPlaying = true;
-        Serial.println("Key Pressed: Playing...");
       }
     }
 
-    // If file is open, stream a chunk of data to I2S
     if (isPlaying && audioFile.available()) {
       static uint8_t buf[512];
       size_t bytesRead = audioFile.read(buf, sizeof(buf));
       size_t bytesWritten;
       i2s_write(I2S_NUM, buf, bytesRead, &bytesWritten, portMAX_DELAY);
     } else if (isPlaying && !audioFile.available()) {
-      // Loop the sound if it reaches the end while key is still held
-      audioFile.seek(44);
+      audioFile.seek(44); // Loop if still holding key
     }
   } 
   else {
-    // Key Released
+    // Immediate stop on release
     if (isPlaying) {
       isPlaying = false;
       audioFile.close();
-      i2s_zero_dma_buffer(I2S_NUM); // Immediately silence the output
-      Serial.println("Key Released: Stopped.");
+      i2s_zero_dma_buffer(I2S_NUM); 
     }
   }
 }
