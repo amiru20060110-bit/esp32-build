@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Arduino CLI
@@ -20,25 +20,37 @@ jobs:
         run: |
           arduino-cli config init
           arduino-cli config set board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+          arduino-cli config set directories.data $GITHUB_WORKSPACE/.arduino
 
       - name: Install ESP32 core
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile sketch for ESP32-S3 (huge app)
+      - name: Compile sketch for ESP32-S3 N16R8
+        shell: bash
         run: |
+          echo "Finding ESP32 partitions directory..."
+          PART_DIR=$(find "$GITHUB_WORKSPACE/.arduino/packages/esp32" -type d -name partitions | head -n 1)
+
+          echo "Using partitions directory:"
+          echo "$PART_DIR"
+          ls "$PART_DIR"
+
+          echo "Copying custom partition file..."
+          cp partition.csv "$PART_DIR/custom.csv"
+
           mkdir -p build
 
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             --build-property build.flash_size=16MB \
             --build-property build.psram=opi \
-            --build-property build.partitions=huge_app \
+            --build-property build.partitions=custom \
             --output-dir build \
             esp32-build.ino
 
-      - name: Upload firmware
+      - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: esp32-s3-firmware
