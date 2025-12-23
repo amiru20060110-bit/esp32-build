@@ -16,11 +16,7 @@
 
 // ================= MATRIX PINS ==============
 #define COL0 40
-#define COL1 41
-
 #define ROW0 15
-#define ROW1 16
-#define ROW2 17
 
 // ================= AUDIO ===================
 #define SAMPLE_RATE 32000
@@ -29,28 +25,21 @@
 File wavFile;
 int16_t buffer[BUFFER_SAMPLES];
 
-// ================= SETUP ===================
 void setup() {
   Serial.begin(115200);
 
-  // Matrix columns
+  // Column and row
   pinMode(COL0, OUTPUT);
-  pinMode(COL1, OUTPUT);
   digitalWrite(COL0, HIGH);
-  digitalWrite(COL1, HIGH);
-
-  // Matrix rows
   pinMode(ROW0, INPUT_PULLUP);
-  pinMode(ROW1, INPUT_PULLUP);
-  pinMode(ROW2, INPUT_PULLUP);
 
-  // Initialize SD card
+  // Initialize SD
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS)) {
-    Serial.println("SD Card initialization failed!");
+    Serial.println("SD Card init failed!");
     while (1);
   }
-  Serial.println("SD Card ready.");
+  Serial.println("SD ready.");
 
   // Initialize I2S
   i2s_config_t cfg = {
@@ -77,43 +66,28 @@ void setup() {
   i2s_set_pin(I2S_NUM_0, &pins);
 }
 
-// ================= PLAYBACK FUNCTION =========
-void playWav(const char* filename) {
-  if (!SD.exists(filename)) return;
-
-  wavFile = SD.open(filename);
-  if (!wavFile) return;
-
-  // Skip WAV header
-  wavFile.seek(44);
-
-  while (wavFile.available()) {
-    int samplesRead = 0;
-    while (samplesRead < BUFFER_SAMPLES && wavFile.available()) {
-      int16_t s = wavFile.read() | (wavFile.read() << 8);
-      buffer[samplesRead++] = s;
-    }
-    size_t bytesWritten;
-    i2s_write(I2S_NUM_0, buffer, samplesRead * 2, &bytesWritten, portMAX_DELAY);
-  }
-  wavFile.close();
-}
-
-// ================= LOOP ======================
 void loop() {
-  // Scan column 0
+  // Scan key
   digitalWrite(COL0, LOW);
   delayMicroseconds(3);
-  if (digitalRead(ROW0) == LOW) playWav("ce4.wav");
-  else if (digitalRead(ROW1) == LOW) playWav("cs4.wav");
-  else if (digitalRead(ROW2) == LOW) playWav("d4.wav");
+  if (digitalRead(ROW0) == LOW) {
+    // Play WAV once
+    if (SD.exists("ce4.wav")) {
+      wavFile = SD.open("ce4.wav");
+      if (wavFile) {
+        wavFile.seek(44); // skip header
+        while (wavFile.available()) {
+          int samplesRead = 0;
+          while (samplesRead < BUFFER_SAMPLES && wavFile.available()) {
+            int16_t s = wavFile.read() | (wavFile.read() << 8);
+            buffer[samplesRead++] = s;
+          }
+          size_t bw;
+          i2s_write(I2S_NUM_0, buffer, samplesRead * 2, &bw, portMAX_DELAY);
+        }
+        wavFile.close();
+      }
+    }
+  }
   digitalWrite(COL0, HIGH);
-
-  // Scan column 1
-  digitalWrite(COL1, LOW);
-  delayMicroseconds(3);
-  if (digitalRead(ROW0) == LOW) playWav("ce4.wav");
-  else if (digitalRead(ROW1) == LOW) playWav("cs4.wav");
-  else if (digitalRead(ROW2) == LOW) playWav("d4.wav");
-  digitalWrite(COL1, HIGH);
 }
