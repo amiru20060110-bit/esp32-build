@@ -15,7 +15,7 @@
 #define I2S_DOUT 3
 
 // Matrix Config: 6 Columns x 5 Rows
-const int colPins[6] = {33, 34, 40, 41, 42, 48}; 
+const int colPins[6] = {33, 34, 40, 41, 42, 38}; 
 const int rowPins[5] = {15, 16, 17, 18, 47}; 
 
 const char* soundFiles[5][6] = {
