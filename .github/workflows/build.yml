@@ -27,14 +27,6 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Install SdFat library
-        run: |
-          arduino-cli lib install "SdFat"
-
-      - name: Install ESP32 Audio library
-        run: |
-          arduino-cli lib install "ESP32-audioI2S"
-
       - name: Compile sketch for ESP32-S3 N16R8
         shell: bash
         run: |
