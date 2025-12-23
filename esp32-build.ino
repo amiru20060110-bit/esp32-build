@@ -4,29 +4,29 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
-// SD Card Pins (SPI) - Kept original as they usually work fine
+// SD Card Pins (Waveshare S3-ETH Default)
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
 #define SD_CS   4
 
-// I2S Pins
+// I2S Pins for MAX98357A
 #define I2S_BCLK 1
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (NEW SAFE PINS for 4x4)
-// Avoided 19-21 and 40-42 due to Flash/USB/JTAG conflicts
-const int colPins[4] = {38, 39, 47, 48}; 
+// Matrix Config (5 Columns x 4 Rows)
+const int colPins[5] = {40, 41, 42, 33, 34}; 
 const int rowPins[4] = {15, 16, 17, 18}; 
 
-const char* soundFiles[4][4] = {
-  {"/16.wav", "/17.wav", "/18.wav", "/19.wav"},
-  {"/20.wav", "/21.wav", "/ce4.wav", "/41.wav"},
-  {"/42.wav", "/43.wav", "/44.wav", "/45.wav"},
-  {"/46.wav", "/47.wav", "/48.wav", "/49.wav"}
+const char* soundFiles[4][5] = {
+  {"/16.wav", "/17.wav",  "/18.wav", "/19.wav", "/20.wav"},
+  {"/21.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav"},
+  {"/44.wav", "/45.wav",  "/46.wav", "/47.wav", "/48.wav"},
+  {"/49.wav", "/50.wav",  "/51.wav", "/52.wav", "/53.wav"}
 };
 
+// Polyphony & Audio Config
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define I2S_NUM I2S_NUM_0
@@ -40,7 +40,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[4][4] = {false}; 
+bool keyStates[4][5] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -75,48 +75,55 @@ void stopVoice(int i) {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); // Give serial time to stabilize
-  
-  for (int i = 0; i < 4; i++) {
+  delay(1000); 
+
+  // Initialize Matrix Pins
+  for (int i = 0; i < 5; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
+  }
+  for (int i = 0; i < 4; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
+  // SPI Setup (20MHz for 4-voice streaming)
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS, SPI, 20000000)) { 
-    Serial.println("SD Fail"); 
+    Serial.println("SD Error!"); 
     while(1); 
   }
 
   setupI2S();
-  Serial.println("Reconfigured with Safe Pins - 4x4 Ready");
+  Serial.println("System Online: 20-Key / 4-Voice Polyphony");
 }
 
 void loop() {
-  for (int c = 0; c < 4; c++) {
+  // 1. Matrix Scanning (Col -> Row)
+  for (int c = 0; c < 5; c++) {
     digitalWrite(colPins[c], HIGH);
-    // Tiny delay to let the pin voltage stabilize
-    delayMicroseconds(10); 
+    delayMicroseconds(30); // Stabilization delay
     
     for (int r = 0; r < 4; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
       if (pressed && !keyStates[r][c]) {
+        // Find empty voice slot for NEW press
         for (int i = 0; i < MAX_VOICES; i++) {
           if (!voices[i].active) {
             voices[i].file = SD.open(soundFiles[r][c]);
             if (voices[i].file) {
-              voices[i].file.seek(44);
+              voices[i].file.seek(44); // Skip header
               voices[i].active = true;
               voices[i].row = r;
               voices[i].col = c;
+              Serial.printf("Playing %s\n", soundFiles[r][c]);
             }
             break; 
           }
         }
       } 
       else if (!pressed && keyStates[r][c]) {
+        // Stop specific voice on RELEASE
         for (int i = 0; i < MAX_VOICES; i++) {
           if (voices[i].active && voices[i].row == r && voices[i].col == c) {
             stopVoice(i);
@@ -128,6 +135,7 @@ void loop() {
     digitalWrite(colPins[c], LOW);
   }
 
+  // 2. Mixing Engine
   int16_t mixBuf[BUF_SIZE];
   memset(mixBuf, 0, sizeof(mixBuf));
   bool anyActive = false;
@@ -141,6 +149,7 @@ void loop() {
         int samplesRead = bytesRead / 2;
         
         for (int j = 0; j < samplesRead; j++) {
+          // Summing with 32-bit math and hard-clamping
           int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
           if (mixed > 32767) mixed = 32767;
           else if (mixed < -32768) mixed = -32768;
