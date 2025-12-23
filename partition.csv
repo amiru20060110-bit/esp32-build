@@ -1,4 +1,6 @@
-# Name,     Type, SubType, Offset, Size,     Flags
-nvs,        data, nvs,     ,       0x5000,
-otadata,    data, ota,     ,       0x2000,
-app0,       app,  factory, ,       0xE00000,
+# Name,        Type, SubType, Offset,    Size,     Flags
+nvs,           data, nvs,     0x9000,   0x5000,
+otadata,       data, ota,     0xE000,   0x2000,
+app0,          app,  factory, 0x10000,  0x180000,   # ~1.5 MB sketch
+coredump,      data, coredump,0x190000, 0x1000,
+spiffs,        data, spiffs, 0x191000, 0xD6F000,   # ~13.75 MB filesystem for WAVs
