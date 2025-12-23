@@ -1,51 +1,48 @@
 #include <Arduino.h>
 #include <driver/i2s.h>
-
-#include "ce4.h"
-#include "cs4.h"
-#include "d4.h"
-#include "ds4.h"
-#include "e4.h"
+#include <SD.h>
+#include <SPI.h>
 
 // ===== I2S PINS =====
 #define I2S_BCLK 1
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// ===== MATRIX =====
-#define COL0 40
-#define COL1 41
+// ===== MATRIX PINS =====
+#define ROW0 15  // CE4
+#define ROW1 16  // CS4
+#define ROW2 17  // D4
+#define COL0 40  // single column, active LOW
 
-#define ROW0 15
-#define ROW1 16
-#define ROW2 17
+// ===== SD CARD PINS =====
+#define SD_MOSI 6
+#define SD_MISO 5
+#define SD_CLK  7
+#define SD_CS   4
 
 // ===== AUDIO =====
-#define SAMPLE_RATE 32000
-#define WAV_HEADER_SIZE 44
+#define SAMPLE_RATE 32000  // changed from 44100 to 32 kHz
 #define BUFFER_SAMPLES 256
 
-const uint8_t* current_wav = nullptr;
-uint32_t wav_size = 0;
-uint32_t wav_pos = WAV_HEADER_SIZE;
-bool playing = false;
+File wavFile;
+int16_t buffer[BUFFER_SAMPLES];
 
 // ===== SETUP =====
 void setup() {
-  // Columns
+  // Matrix setup
+  pinMode(ROW0, OUTPUT); digitalWrite(ROW0, HIGH);
+  pinMode(ROW1, OUTPUT); digitalWrite(ROW1, HIGH);
+  pinMode(ROW2, OUTPUT); digitalWrite(ROW2, HIGH);
   pinMode(COL0, INPUT_PULLUP);
-  pinMode(COL1, INPUT_PULLUP);
 
-  // Rows
-  pinMode(ROW0, OUTPUT);
-  pinMode(ROW1, OUTPUT);
-  pinMode(ROW2, OUTPUT);
+  // SD card setup
+  SPIClass spiSD(SD_MOSI, SD_MISO, SD_CLK, SD_CS);
+  if (!SD.begin(SD_CS, spiSD)) {
+    Serial.println("SD Card init failed!");
+    while (1);
+  }
 
-  digitalWrite(ROW0, HIGH);
-  digitalWrite(ROW1, HIGH);
-  digitalWrite(ROW2, HIGH);
-
-  // I2S config
+  // I2S setup
   i2s_config_t cfg = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
@@ -61,71 +58,54 @@ void setup() {
 
   i2s_pin_config_t pins = {
     .bck_io_num = I2S_BCLK,
-    .ws_io_num = I2S_LRC,
+    .ws_io_num  = I2S_LRC,
     .data_out_num = I2S_DOUT,
-    .data_in_num = I2S_PIN_NO_CHANGE
+    .data_in_num  = I2S_PIN_NO_CHANGE
   };
 
   i2s_driver_install(I2S_NUM_0, &cfg, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pins);
 }
 
-// ===== SCAN ONE ROW =====
-void scanRow(int rowPin,
-             const uint8_t* wav0, uint32_t size0,
-             const uint8_t* wav1, uint32_t size1) {
-
-  digitalWrite(rowPin, LOW);
-  delayMicroseconds(3);
-
-  if (digitalRead(COL0) == LOW) {
-    current_wav = wav0;
-    wav_size = size0;
-  }
-  if (digitalRead(COL1) == LOW) {
-    current_wav = wav1;
-    wav_size = size1;
-  }
-
-  digitalWrite(rowPin, HIGH);
-}
-
 // ===== LOOP =====
 void loop() {
-  current_wav = nullptr;
+  File selectedFile;
 
-  scanRow(ROW0, ce4, sizeof(ce4), cs4, sizeof(cs4));
-  scanRow(ROW1, d4,  sizeof(d4),  ds4, sizeof(ds4));
-  scanRow(ROW2, e4,  sizeof(e4),  nullptr, 0);
+  // Scan matrix
+  int16_t rowPins[3] = {ROW0, ROW1, ROW2};
+  const char* wavFiles[3] = {"/ce4.wav", "/cs4.wav", "/d4.wav"};
+  bool keyPressed = false;
 
-  // No key pressed
-  if (!current_wav) {
-    playing = false;
-    return;
+  for (int r = 0; r < 3; r++) {
+    digitalWrite(rowPins[r], LOW);
+    delayMicroseconds(3);
+    if (digitalRead(COL0) == LOW) {
+      selectedFile = SD.open(wavFiles[r]);
+      keyPressed = true;
+      digitalWrite(rowPins[r], HIGH);
+      break;
+    }
+    digitalWrite(rowPins[r], HIGH);
   }
 
-  // Start once per key press
-  if (!playing) {
-    wav_pos = WAV_HEADER_SIZE;
-    playing = true;
+  if (!keyPressed) return;
+
+  if (!selectedFile) return;
+
+  // Skip WAV header (assume 44 bytes)
+  selectedFile.seek(44);
+
+  // Play audio until file ends
+  while (selectedFile.available()) {
+    int samplesRead = 0;
+    while (samplesRead < BUFFER_SAMPLES && selectedFile.available()) {
+      uint8_t lo = selectedFile.read();
+      uint8_t hi = selectedFile.read();
+      buffer[samplesRead++] = (int16_t)(lo | (hi << 8));
+    }
+    size_t bytesWritten;
+    i2s_write(I2S_NUM_0, buffer, samplesRead * 2, &bytesWritten, portMAX_DELAY);
   }
 
-  // Stop when sample ends (no looping)
-  if (wav_pos >= wav_size - 2) {
-    playing = false;
-    return;
-  }
-
-  int16_t buffer[BUFFER_SAMPLES];
-  int samples = 0;
-
-  while (samples < BUFFER_SAMPLES && wav_pos < wav_size - 2) {
-    buffer[samples++] =
-      (int16_t)(current_wav[wav_pos] |
-               (current_wav[wav_pos + 1] << 8));
-    wav_pos += 2;
-  }
-
-  size_t bw;
-  i2s_write(I2S_NUM_0, buffer, samples * 2, &bw, portMAX_DELAY);
+  selectedFile.close();
 }
