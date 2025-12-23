@@ -15,15 +15,16 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (5 Columns x 4 Rows)
-const int colPins[5] = {40, 41, 42, 33, 34}; 
-const int rowPins[4] = {15, 16, 17, 18}; 
+// Matrix Config (6 Columns x 5 Rows)
+const int colPins[6] = {40, 41, 42, 33, 34, 38}; 
+const int rowPins[5] = {15, 16, 17, 18, 47}; 
 
-const char* soundFiles[4][5] = {
-  {"/16.wav", "/17.wav",  "/18.wav", "/19.wav", "/20.wav"},
-  {"/21.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav"},
-  {"/44.wav", "/45.wav",  "/46.wav", "/47.wav", "/48.wav"},
-  {"/49.wav", "/50.wav",  "/51.wav", "/52.wav", "/53.wav"}
+const char* soundFiles[5][6] = {
+  {"/16.wav", "/17.wav",  "/18.wav", "/19.wav", "/20.wav", "/54.wav"},
+  {"/21.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav", "/55.wav"},
+  {"/44.wav", "/45.wav",  "/46.wav", "/47.wav", "/48.wav", "/56.wav"},
+  {"/49.wav", "/50.wav",  "/51.wav", "/52.wav", "/53.wav", "/57.wav"},
+  {"/58.wav", "/59.wav",  "/60.wav", "/61.wav", "/62.wav", "/63.wav"}
 };
 
 // Polyphony & Audio Config
@@ -40,7 +41,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[4][5] = {false}; 
+bool keyStates[5][6] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -75,14 +76,14 @@ void stopVoice(int i) {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); 
+  delay(2000); // Increased delay for system/PSRAM stability
 
   // Initialize Matrix Pins
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 6; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
   }
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
@@ -94,16 +95,16 @@ void setup() {
   }
 
   setupI2S();
-  Serial.println("System Online: 20-Key / 4-Voice Polyphony");
+  Serial.println("System Online: 30-Key / 4-Voice Polyphony");
 }
 
 void loop() {
   // 1. Matrix Scanning (Col -> Row)
-  for (int c = 0; c < 5; c++) {
+  for (int c = 0; c < 6; c++) {
     digitalWrite(colPins[c], HIGH);
     delayMicroseconds(30); // Stabilization delay
     
-    for (int r = 0; r < 4; r++) {
+    for (int r = 0; r < 5; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
       if (pressed && !keyStates[r][c]) {
