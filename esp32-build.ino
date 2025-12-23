@@ -15,16 +15,24 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix (Col -> Row)
-#define COL_PIN 40  
-#define ROW_PIN 15  
+// Matrix Pins
+const int colPins[2] = {40, 41};
+const int rowPins[2] = {15, 16};
 
-// Audio Config: 16-bit, 32kHz, Mono
+// File Mapping
+const char* soundFiles[2][2] = {
+  {"/ce4.wav", "/16.wav"},
+  {"/17.wav",  "/18.wav"}
+};
+
+// Audio Config
 #define SAMPLE_RATE 32000
 #define I2S_NUM     I2S_NUM_0
 
 File audioFile;
 bool isPlaying = false;
+int activeKeyRow = -1;
+int activeKeyCol = -1;
 bool keyWasPressedLastCycle = false;
 
 void setupI2S() {
@@ -35,8 +43,8 @@ void setupI2S() {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,   // Reduced count for lower latency
-    .dma_buf_len = 256,   // Smaller buffers = faster stop response
+    .dma_buf_count = 4,
+    .dma_buf_len = 256,
     .use_apll = false
   };
 
@@ -54,62 +62,88 @@ void setupI2S() {
 void setup() {
   Serial.begin(115200);
 
-  pinMode(COL_PIN, OUTPUT);
-  pinMode(ROW_PIN, INPUT_PULLDOWN);
-  digitalWrite(COL_PIN, LOW);
+  // Matrix Setup
+  for (int i = 0; i < 2; i++) {
+    pinMode(colPins[i], OUTPUT);
+    digitalWrite(colPins[i], LOW);
+    pinMode(rowPins[i], INPUT_PULLDOWN);
+  }
 
+  // SD Setup
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS)) {
     Serial.println("SD Error");
-    while(1);
+    while (1);
   }
-  
+
   setupI2S();
+  Serial.println("2x2 Matrix Ready.");
 }
 
 void loop() {
-  // Scan Matrix
-  digitalWrite(COL_PIN, HIGH);
-  bool keyPressed = (digitalRead(ROW_PIN) == HIGH);
-  digitalWrite(COL_PIN, LOW);
+  int currentPressedRow = -1;
+  int currentPressedCol = -1;
+  bool anyKeyPressed = false;
 
-  if (keyPressed) {
-    // Start playing only on the initial transition from LOW to HIGH
-    if (!keyWasPressedLastCycle && !isPlaying) {
-      audioFile = SD.open("/ce4.wav");
+  // --- Scan 2x2 Matrix ---
+  for (int c = 0; c < 2; c++) {
+    digitalWrite(colPins[c], HIGH);
+    for (int r = 0; r < 2; r++) {
+      if (digitalRead(rowPins[r]) == HIGH) {
+        currentPressedRow = r;
+        currentPressedCol = c;
+        anyKeyPressed = true;
+        break;
+      }
+    }
+    digitalWrite(colPins[c], LOW);
+    if (anyKeyPressed) break;
+  }
+
+  if (anyKeyPressed) {
+    // If it's a new press or a different key than before
+    if (!keyWasPressedLastCycle || (currentPressedRow != activeKeyRow || currentPressedCol != activeKeyCol)) {
+      if (isPlaying) {
+        audioFile.close();
+        i2s_zero_dma_buffer(I2S_NUM);
+      }
+      
+      activeKeyRow = currentPressedRow;
+      activeKeyCol = currentPressedCol;
+      audioFile = SD.open(soundFiles[activeKeyRow][activeKeyCol]);
+      
       if (audioFile) {
         audioFile.seek(44); // Skip WAV header
         isPlaying = true;
+        Serial.printf("Playing: %s\n", soundFiles[activeKeyRow][activeKeyCol]);
       }
     }
 
-    // While key is held, stream audio data
+    // Stream Audio
     if (isPlaying && audioFile.available()) {
-      static uint8_t buf[256]; // Smaller chunks for high responsiveness
+      static uint8_t buf[256];
       size_t bytesRead = audioFile.read(buf, sizeof(buf));
       size_t bytesWritten;
-      // Feed data to I2S
       i2s_write(I2S_NUM, buf, bytesRead, &bytesWritten, portMAX_DELAY);
     } 
     else if (isPlaying && !audioFile.available()) {
-      // End of file reached: Stop and stay quiet even if key is still held
+      // Finished playing (one-time play logic)
       isPlaying = false;
       audioFile.close();
       i2s_zero_dma_buffer(I2S_NUM);
     }
   } 
   else {
-    // IMMEDIATE STOP: Key was released
+    // IMMEDIATE STOP on release
     if (isPlaying) {
       isPlaying = false;
-      if(audioFile) audioFile.close();
-      
-      // This is the magic command: it wipes the internal ESP32 
-      // audio buffer so you don't hear the last 0.1s of audio.
-      i2s_zero_dma_buffer(I2S_NUM); 
-      Serial.println("Stopped Immediately");
+      audioFile.close();
+      i2s_zero_dma_buffer(I2S_NUM);
+      Serial.println("Key Released - Stopped.");
     }
+    activeKeyRow = -1;
+    activeKeyCol = -1;
   }
 
-  keyWasPressedLastCycle = keyPressed;
+  keyWasPressedLastCycle = anyKeyPressed;
 }
