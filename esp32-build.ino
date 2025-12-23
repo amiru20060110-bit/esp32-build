@@ -15,14 +15,15 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Pins
-const int colPins[2] = {40, 41};
-const int rowPins[2] = {15, 16};
+// Matrix Pins (3x3)
+const int colPins[3] = {40, 41, 42};
+const int rowPins[3] = {15, 16, 17};
 
-// File Mapping
-const char* soundFiles[2][2] = {
-  {"/ce4.wav", "/16.wav"},
-  {"/17.wav",  "/18.wav"}
+// File Mapping (Row x Column)
+const char* soundFiles[3][3] = {
+  {"/16.wav",  "/17.wav",  "/18.wav"},
+  {"/35.wav",  "/ce4.wav", "/60.wav"},
+  {"/61.wav",  "/62.wav",  "/63.wav"}
 };
 
 // Audio Config
@@ -63,7 +64,7 @@ void setup() {
   Serial.begin(115200);
 
   // Matrix Setup
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 3; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
@@ -72,12 +73,12 @@ void setup() {
   // SD Setup
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if (!SD.begin(SD_CS)) {
-    Serial.println("SD Error");
+    Serial.println("SD Mount Failed");
     while (1);
   }
 
   setupI2S();
-  Serial.println("2x2 Matrix Ready.");
+  Serial.println("3x3 Matrix Audio System Online");
 }
 
 void loop() {
@@ -85,11 +86,11 @@ void loop() {
   int currentPressedCol = -1;
   bool anyKeyPressed = false;
 
-  // --- Scan 2x2 Matrix ---
-  for (int c = 0; c < 2; c++) {
-    digitalWrite(colPins[c], HIGH);
-    for (int r = 0; r < 2; r++) {
-      if (digitalRead(rowPins[r]) == HIGH) {
+  // --- Scan 3x3 Matrix ---
+  for (int c = 0; c < 3; c++) {
+    digitalWrite(colPins[c], HIGH); // Pulse Column
+    for (int r = 0; r < 3; r++) {
+      if (digitalRead(rowPins[r]) == HIGH) { // Check Row
         currentPressedRow = r;
         currentPressedCol = c;
         anyKeyPressed = true;
@@ -97,12 +98,12 @@ void loop() {
       }
     }
     digitalWrite(colPins[c], LOW);
-    if (anyKeyPressed) break;
+    if (anyKeyPressed) break; 
   }
 
   if (anyKeyPressed) {
-    // If it's a new press or a different key than before
-    if (!keyWasPressedLastCycle || (currentPressedRow != activeKeyRow || currentPressedCol != activeKeyCol)) {
+    // Only Trigger if it's a fresh press (One-Time Play Logic)
+    if (!keyWasPressedLastCycle) {
       if (isPlaying) {
         audioFile.close();
         i2s_zero_dma_buffer(I2S_NUM);
@@ -113,13 +114,13 @@ void loop() {
       audioFile = SD.open(soundFiles[activeKeyRow][activeKeyCol]);
       
       if (audioFile) {
-        audioFile.seek(44); // Skip WAV header
+        audioFile.seek(44); // Skip header
         isPlaying = true;
         Serial.printf("Playing: %s\n", soundFiles[activeKeyRow][activeKeyCol]);
       }
     }
 
-    // Stream Audio
+    // Streaming loop
     if (isPlaying && audioFile.available()) {
       static uint8_t buf[256];
       size_t bytesRead = audioFile.read(buf, sizeof(buf));
@@ -127,22 +128,20 @@ void loop() {
       i2s_write(I2S_NUM, buf, bytesRead, &bytesWritten, portMAX_DELAY);
     } 
     else if (isPlaying && !audioFile.available()) {
-      // Finished playing (one-time play logic)
+      // Auto-stop at end of file
       isPlaying = false;
       audioFile.close();
       i2s_zero_dma_buffer(I2S_NUM);
     }
   } 
   else {
-    // IMMEDIATE STOP on release
+    // IMMEDIATE STOP on key release
     if (isPlaying) {
       isPlaying = false;
       audioFile.close();
       i2s_zero_dma_buffer(I2S_NUM);
-      Serial.println("Key Released - Stopped.");
+      Serial.println("Released: Silence.");
     }
-    activeKeyRow = -1;
-    activeKeyCol = -1;
   }
 
   keyWasPressedLastCycle = anyKeyPressed;
