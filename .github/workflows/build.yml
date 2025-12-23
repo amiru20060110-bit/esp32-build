@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Arduino CLI
@@ -28,10 +28,13 @@ jobs:
           arduino-cli core install esp32:esp32
 
       - name: Compile sketch for ESP32-S3 N16R8
+        shell: bash
         run: |
-          PART_DIR="$HOME/.arduino/packages/esp32/hardware/esp32/3.3.5/tools/partitions"
+          echo "Finding ESP32 partitions directory..."
+          PART_DIR=$(find "$GITHUB_WORKSPACE/.arduino/packages/esp32" -type d -name partitions | head -n 1)
 
           echo "Using partitions directory:"
+          echo "$PART_DIR"
           ls "$PART_DIR"
 
           echo "Copying custom partition file..."
@@ -47,7 +50,7 @@ jobs:
             --output-dir build \
             esp32-build.ino
 
-      - name: Upload firmware
+      - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
         with:
           name: esp32-s3-firmware
