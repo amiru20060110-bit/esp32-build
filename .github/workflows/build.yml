@@ -27,22 +27,22 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Compile sketch
-        run: |
-          # Find the internal partitions folder
-          PARTITION_DIR=$(find $GITHUB_WORKSPACE/.arduino/packages/esp32/hardware/esp32 -name "partitions" -type d | head -n 1)
-          
-          # Copy your repo's partition.csv to the internal folder
-          cp partition.csv "$PARTITION_DIR/custom.csv"
-          
-          mkdir -p build
-          arduino-cli compile \
-            --fqbn esp32:esp32:esp32s3 \
-            --build-property build.flash_size=16MB \
-            --build-property build.psram=opi \
-            --build-property build.partitions=custom \
-            --output-dir build \
-            esp32-build.ino
+- name: Compile sketch for ESP32-S3 N16R8
+  run: |
+    PART_DIR="$HOME/.arduino/packages/esp32/hardware/esp32/3.3.5/tools/partitions"
+
+    echo "Copying custom partition file..."
+    cp partition.csv "$PART_DIR/custom.csv"
+
+    mkdir -p build
+
+    arduino-cli compile \
+      --fqbn esp32:esp32:esp32s3 \
+      --build-property build.flash_size=16MB \
+      --build-property build.psram=opi \
+      --build-property build.partitions=custom \
+      --output-dir build \
+      esp32-build.ino
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
