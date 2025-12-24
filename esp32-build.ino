@@ -10,7 +10,7 @@
 #define SD_CS   4
 
 #define I2S_BCLK 1
-#define I2S_LRC  22
+#define I2S_LRC  44
 #define I2S_DOUT 3
 
 // Final Matrix Config (8 Columns x 8 Rows = 64 keys)
