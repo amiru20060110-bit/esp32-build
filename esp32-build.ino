@@ -19,17 +19,26 @@ const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 2};
 // Rows: Includes 45 from the previous step
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
-// Sound Files grid [8][8]
+// Mapping physical keyboard PA0-PA7 (Rows) and PB0-PB7 (Cols) to specific files
 const char* soundFiles[8][8] = {
-  {"/1.wav", "/2.wav", "/3.wav", "/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav"},
-  {"/21.wav", "/22.wav", "/23.wav", "/24.wav", "/25.wav", "/26.wav", "/27.wav", "/28.wav"},
-  {"/29.wav", "/30.wav", "/31.wav", "/32.wav", "/33.wav", "/34.wav", "/35.wav", "/36.wav"},
-  {"/37.wav", "/38.wav", "/39.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav", "/44.wav"},
-  {"/45.wav", "/46.wav", "/47.wav", "/48.wav", "/49.wav", "/50.wav", "/51.wav", "/52.wav"},
-  {"/53.wav", "/54.wav", "/55.wav", "/56.wav", "/57.wav", "/58.wav", "/59.wav", "/60.wav"},
-  {"/61.wav", "/62.wav", "/63.wav", "/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav"},
-  {"/69.wav", "/70.wav", "/71.wav", "/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav"}
+  // PA0: Files 16 to 23 (Starting at C2)
+  {"/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav", "/21.wav", "/22.wav", "/23.wav"},
+  // PA1: Files 24 to 31
+  {"/24.wav", "/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav", "/30.wav", "/31.wav"},
+  // PA2: Files 32 to 39
+  {"/32.wav", "/33.wav", "/34.wav", "/35.wav", "/36.wav", "/37.wav", "/38.wav", "/39.wav"},
+  // PA3: Files starting with ce4.wav (C4) up to 47.wav
+  {"/ce4.wav", "/41.wav", "/42.wav", "/43.wav", "/44.wav", "/45.wav", "/46.wav", "/47.wav"},
+  // PA4: Files 48 to 55
+  {"/48.wav", "/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav"},
+  // PA5: Files 56 to 63
+  {"/56.wav", "/57.wav", "/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
+  // PA6: Files 64 to 71
+  {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav", "/70.wav", "/71.wav"},
+  // PA7: Files 72 to 76 (76.wav is the 61st key)
+  {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "none", "none", "none"}
 };
+
 
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
