@@ -4,14 +4,18 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
+// SD Card Pins
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
 #define SD_CS   4
+
+// I2S Pins
 #define I2S_BCLK 1
 #define I2S_LRC  44
 #define I2S_DOUT 3
 
+// Matrix Config
 const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 2}; 
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
@@ -32,17 +36,19 @@ const char* soundFiles[8][8] = {
 
 struct Voice {
   File file;
-  int row = -1, col = -1;
+  int row = -1;
+  int col = -1;
   bool active = false;
 };
 
 Voice voices[MAX_VOICES];
-volatile bool sharedKeys[8][8] = {false}; // Shared between cores
+volatile bool sharedKeys[8][8] = {false}; // Shared state across cores
 bool keyStates[8][8] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_TX),
+    // Fixed: used I2S_MODE_TX instead of I2S_TX for Core 3.3.5 compatibility
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
@@ -53,13 +59,16 @@ void setupI2S() {
     .use_apll = false
   };
   i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_BCLK, .ws_io_num = I2S_LRC, .data_out_num = I2S_DOUT, .data_in_num = I2S_PIN_NO_CHANGE
+    .bck_io_num = I2S_BCLK,
+    .ws_io_num = I2S_LRC,
+    .data_out_num = I2S_DOUT,
+    .data_in_num = I2S_PIN_NO_CHANGE
   };
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pin_config);
 }
 
-// Core 0 Task: Constant high-speed scanning
+// Core 0 Task: High-speed matrix scanning
 void scanTask(void * pvParameters) {
   for(;;) {
     for (int c = 0; c < 8; c++) {
@@ -70,43 +79,66 @@ void scanTask(void * pvParameters) {
       }
       digitalWrite(colPins[c], LOW);
     }
-    vTaskDelay(1); // Required for FreeRTOS stability
+    vTaskDelay(1); // Keep the watchdog happy
+  }
+}
+
+void stopVoice(int i) {
+  if (voices[i].active) {
+    voices[i].file.close();
+    voices[i].active = false;
+    voices[i].row = -1;
+    voices[i].col = -1;
   }
 }
 
 void setup() {
+  Serial.begin(115200);
+  
   for (int i = 0; i < 8; i++) {
-    pinMode(colPins[i], OUTPUT); digitalWrite(colPins[i], LOW);
+    pinMode(colPins[i], OUTPUT);
+    digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
+
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
-  SD.begin(SD_CS, SPI, 40000000);
+  // High performance SD speed for multi-file mixing
+  if (!SD.begin(SD_CS, SPI, 40000000)) { 
+    while(1); 
+  }
+
   setupI2S();
 
-  // Start Scanner on Core 0
+  // Launch Matrix Scanner on Core 0
   xTaskCreatePinnedToCore(scanTask, "Scanner", 4096, NULL, 1, NULL, 0);
+  
+  Serial.println("Dual-Core Keyboard Online");
 }
 
 void loop() {
-  // Core 1 Logic: Audio and File handling
+  // Handle file logic based on scanner state from Core 0
   for (int c = 0; c < 8; c++) {
     for (int r = 0; r < 8; r++) {
       bool pressed = sharedKeys[r][c];
+      
       if (pressed && !keyStates[r][c]) {
         for (int i = 0; i < MAX_VOICES; i++) {
           if (!voices[i].active) {
             voices[i].file = SD.open(soundFiles[r][c]);
             if (voices[i].file) {
-              voices[i].file.seek(44); // Skip WAV header
-              voices[i].active = true; voices[i].row = r; voices[i].col = c;
+              voices[i].file.seek(44); 
+              voices[i].active = true;
+              voices[i].row = r;
+              voices[i].col = c;
             }
-            break;
+            break; 
           }
         }
-      } else if (!pressed && keyStates[r][c]) {
+      } 
+      else if (!pressed && keyStates[r][c]) {
         for (int i = 0; i < MAX_VOICES; i++) {
           if (voices[i].active && voices[i].row == r && voices[i].col == c) {
-            voices[i].file.close(); voices[i].active = false;
+            stopVoice(i);
           }
         }
       }
@@ -114,16 +146,24 @@ void loop() {
     }
   }
 
+  // Audio Processing and Mixing
   int16_t mixBuf[BUF_SIZE] = {0};
   bool anyActive = false;
+
   for (int i = 0; i < MAX_VOICES; i++) {
-    if (voices[i].active && voices[i].file.available()) {
-      anyActive = true;
-      int16_t tempBuf[BUF_SIZE];
-      voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
-      for (int j = 0; j < BUF_SIZE; j++) {
-        int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
-        mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
+    if (voices[i].active) {
+      if (voices[i].file.available()) {
+        anyActive = true;
+        int16_t tempBuf[BUF_SIZE];
+        size_t bytesRead = voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
+        int samplesRead = bytesRead / 2;
+        
+        for (int j = 0; j < samplesRead; j++) {
+          int32_t mixed = (int32_t)mixBuf[j] + (int32_t)tempBuf[j];
+          mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767); // Anti-pop clipping protection
+        }
+      } else {
+        stopVoice(i);
       }
     }
   }
@@ -132,6 +172,6 @@ void loop() {
     size_t written;
     i2s_write(I2S_NUM_0, mixBuf, sizeof(mixBuf), &written, portMAX_DELAY);
   } else {
-    i2s_zero_dma_buffer(I2S_NUM_0);
+    i2s_zero_dma_buffer(I2S_NUM_0); // Prevent popping between notes
   }
 }
