@@ -15,17 +15,19 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (6 Columns x 6 Rows = 36 keys)
+// Matrix Config (6 Columns x 7 Rows = 42 keys)
+// GPIO 21 skipped to avoid LED interference/distortion
 const int colPins[6] = {40, 41, 42, 33, 34, 35}; 
-const int rowPins[6] = {15, 16, 17, 18, 38, 36}; 
+const int rowPins[7] = {15, 16, 17, 18, 38, 36, 37}; 
 
-const char* soundFiles[6][6] = {
+const char* soundFiles[7][6] = {
   {"/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav", "/54.wav"},
   {"/21.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav", "/55.wav"},
   {"/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav", "/56.wav"},
   {"/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/57.wav"},
   {"/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
-  {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav"}
+  {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav"},
+  {"/70.wav", "/71.wav", "/72.wav", "/73.wav", "/74.wav", "/75.wav"}
 };
 
 // Polyphony & Audio Config
@@ -42,7 +44,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[6][6] = {false}; 
+bool keyStates[7][6] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -83,6 +85,8 @@ void setup() {
   for (int i = 0; i < 6; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
+  }
+  for (int i = 0; i < 7; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
@@ -94,7 +98,7 @@ void setup() {
   }
 
   setupI2S();
-  Serial.println("System Online: 36-Key / 4-Voice Polyphony");
+  Serial.println("System Online: 42-Key / 4-Voice Polyphony");
 }
 
 void loop() {
@@ -103,7 +107,7 @@ void loop() {
     digitalWrite(colPins[c], HIGH);
     delayMicroseconds(30); 
     
-    for (int r = 0; r < 6; r++) {
+    for (int r = 0; r < 7; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
       if (pressed && !keyStates[r][c]) {
