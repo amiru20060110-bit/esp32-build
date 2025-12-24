@@ -13,21 +13,21 @@
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (7 Columns x 8 Rows = 56 keys)
-// Added GPIO 45 to Rows
-const int colPins[7] = {40, 41, 42, 33, 34, 35, 39}; 
+// Matrix Config (8 Columns x 8 Rows = 64 keys)
+// Columns: GPIO 0 used instead of 47
+const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 0}; 
+// Rows: 15, 16, 17, 18, 38, 36, 37, 45
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
-// Array updated for 8x7
-const char* soundFiles[8][7] = {
-  {"/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav", "/21.wav", "/22.wav"},
-  {"/23.wav", "/24.wav", "/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav"},
-  {"/30.wav", "/31.wav", "/32.wav", "/33.wav", "/34.wav", "/35.wav", "/36.wav"},
-  {"/37.wav", "/38.wav", "/39.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav"},
-  {"/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav", "/49.wav", "/50.wav"},
-  {"/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav", "/56.wav", "/57.wav"},
-  {"/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav", "/64.wav"},
-  {"/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav", "/70.wav", "/71.wav"}
+const char* soundFiles[8][8] = {
+  {"/1.wav", "/2.wav", "/3.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav"},
+  {"/70.wav", "/71.wav", "/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "/16.wav"},
+  {"/17.wav", "/18.wav", "/19.wav", "/20.wav", "/21.wav", "/22.wav", "/23.wav", "/24.wav"},
+  {"/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav", "/30.wav", "/31.wav", "/32.wav"},
+  {"/33.wav", "/34.wav", "/35.wav", "/36.wav", "/37.wav", "/38.wav", "/39.wav", "/40.wav"},
+  {"/41.wav", "/42.wav", "/43.wav", "/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav"},
+  {"/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav", "/56.wav"},
+  {"/57.wav", "/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav", "/64.wav"}
 };
 
 #define MAX_VOICES 4
@@ -43,7 +43,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[8][7] = {false}; 
+bool keyStates[8][8] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -80,11 +80,9 @@ void setup() {
   Serial.begin(115200);
   delay(2000); 
 
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < 8; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
-  }
-  for (int i = 0; i < 8; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
@@ -95,11 +93,11 @@ void setup() {
   }
 
   setupI2S();
-  Serial.println("System Online: 56-Key / 4-Voice Polyphony");
+  Serial.println("System Online: 64-Key Matrix (GPIO 0 Column) Ready");
 }
 
 void loop() {
-  for (int c = 0; c < 7; c++) {
+  for (int c = 0; c < 8; c++) {
     digitalWrite(colPins[c], HIGH);
     delayMicroseconds(30); 
     
