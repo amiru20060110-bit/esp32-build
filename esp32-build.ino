@@ -4,33 +4,32 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
-// SD Card Pins (Waveshare S3-ETH Default)
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
 #define SD_CS   4
 
-// I2S Pins for MAX98357A
 #define I2S_BCLK 1
 #define I2S_LRC  2
 #define I2S_DOUT 3
 
-// Matrix Config (7 Columns x 7 Rows = 49 keys)
-// Added GPIO 39 to Columns
+// Matrix Config (7 Columns x 8 Rows = 56 keys)
+// Added GPIO 45 to Rows
 const int colPins[7] = {40, 41, 42, 33, 34, 35, 39}; 
-const int rowPins[7] = {15, 16, 17, 18, 38, 36, 37}; 
+const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
-const char* soundFiles[7][7] = {
-  {"/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav", "/56.wav"},
-  {"/57.wav", "/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
-  {"/64.wav", "/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav", "/21.wav"},
-  {"/22.wav", "/23.wav", "/24.wav", "/25.wav", "/26.wav", "/27.wav", "/28.wav"},
-  {"/29.wav", "/30.wav", "/31.wav", "/32.wav", "/33.wav", "/34.wav", "/35.wav"},
-  {"/36.wav", "/37.wav", "/38.wav", "/39.wav", "/40.wav", "/41.wav", "/42.wav"},
-  {"/43.wav", "/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav", "/49.wav"}
+// Array updated for 8x7
+const char* soundFiles[8][7] = {
+  {"/16.wav", "/17.wav", "/18.wav", "/19.wav", "/20.wav", "/21.wav", "/22.wav"},
+  {"/23.wav", "/24.wav", "/25.wav", "/26.wav", "/27.wav", "/28.wav", "/29.wav"},
+  {"/30.wav", "/31.wav", "/32.wav", "/33.wav", "/34.wav", "/35.wav", "/36.wav"},
+  {"/37.wav", "/38.wav", "/39.wav", "/ce4.wav", "/41.wav", "/42.wav", "/43.wav"},
+  {"/44.wav", "/45.wav", "/46.wav", "/47.wav", "/48.wav", "/49.wav", "/50.wav"},
+  {"/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav", "/56.wav", "/57.wav"},
+  {"/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav", "/64.wav"},
+  {"/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav", "/70.wav", "/71.wav"}
 };
 
-// Polyphony & Audio Config
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define I2S_NUM I2S_NUM_0
@@ -44,7 +43,7 @@ struct Voice {
 };
 
 Voice voices[MAX_VOICES];
-bool keyStates[7][7] = {false}; 
+bool keyStates[8][7] = {false}; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -84,6 +83,8 @@ void setup() {
   for (int i = 0; i < 7; i++) {
     pinMode(colPins[i], OUTPUT);
     digitalWrite(colPins[i], LOW);
+  }
+  for (int i = 0; i < 8; i++) {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
 
@@ -94,7 +95,7 @@ void setup() {
   }
 
   setupI2S();
-  Serial.println("System Online: 49-Key / 4-Voice Polyphony");
+  Serial.println("System Online: 56-Key / 4-Voice Polyphony");
 }
 
 void loop() {
@@ -102,7 +103,7 @@ void loop() {
     digitalWrite(colPins[c], HIGH);
     delayMicroseconds(30); 
     
-    for (int r = 0; r < 7; r++) {
+    for (int r = 0; r < 8; r++) {
       bool pressed = (digitalRead(rowPins[r]) == HIGH);
       
       if (pressed && !keyStates[r][c]) {
