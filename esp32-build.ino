@@ -10,12 +10,12 @@
 #define SD_CS   4
 
 #define I2S_BCLK 1
-#define I2S_LRC  2
+#define I2S_LRC  22
 #define I2S_DOUT 3
 
 // Final Matrix Config (8 Columns x 8 Rows = 64 keys)
 // Columns: Added GPIO 47
-const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 47}; 
+const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 2}; 
 // Rows: Includes 45 from the previous step
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
