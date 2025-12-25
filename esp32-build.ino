@@ -28,16 +28,17 @@ const char* soundFiles[8][8] = {
 
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
-#define BUF_SIZE 512 // Increased for smoother playback
-#define FADE_SAMPLES 120 
-#define SAFETY_GAIN 0.60f // Lowered further to eliminate 5th-octave clipping
+#define BUF_SIZE 512 
+#define FADE_SAMPLES 150 // Slightly longer fade-in for vibraphone
+#define GLOBAL_GAIN 0.55f // Master volume to prevent clipping
 
 struct Voice {
   File file;
   int row = -1, col = -1;
   bool active = false;
   uint32_t samplesPlayed = 0;
-  int16_t lastSample = 0; // For smoothing transitions
+  int16_t lastSample = 0;
+  float noteGain = 1.0f; // Individual gain per note
 };
 
 Voice voices[MAX_VOICES];
@@ -53,14 +54,14 @@ void setupI2S() {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8, // More buffers = smoother audio
+    .dma_buf_count = 8, 
     .dma_buf_len = 256,
     .use_apll = false
   };
+  i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_pin_config_t pin_config = {
     .bck_io_num = I2S_BCLK, .ws_io_num = I2S_LRC, .data_out_num = I2S_DOUT, .data_in_num = I2S_PIN_NO_CHANGE
   };
-  i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
   i2s_set_pin(I2S_NUM_0, &pin_config);
 }
 
@@ -95,7 +96,7 @@ void loop() {
       bool pressed = sharedKeys[r][c];
       if (pressed && !keyStates[r][c]) {
         if (r == 7 && c == 5) { currentBank = (currentBank == 0) ? 1 : 0; } 
-        else if (strcmp(soundFiles[r][c], "none") != 0) {
+        else if (strcmp(soundFiles[r][c], "none") != 0 && strcmp(soundFiles[r][c], "SWITCH") != 0) {
           for (int i = 0; i < MAX_VOICES; i++) {
             if (!voices[i].active) {
               char fullPath[32];
@@ -107,6 +108,11 @@ void loop() {
                 voices[i].samplesPlayed = 0;
                 voices[i].lastSample = 0;
                 voices[i].row = r; voices[i].col = c;
+                
+                // --- NEW: Damping logic for high notes ---
+                // Low notes (row 0-2) stay loud. High notes (row 6-7) get quieter.
+                voices[i].noteGain = 1.0f - (r * 0.08f); 
+                if (currentBank == 1) voices[i].noteGain *= 0.8f; // Extra damping for Vibraphone
               }
               break; 
             }
@@ -136,12 +142,13 @@ void loop() {
       for (int j = 0; j < (int)(bytesRead / 2); j++) {
         float vol = (voices[i].samplesPlayed < FADE_SAMPLES) ? (float)voices[i].samplesPlayed / FADE_SAMPLES : 1.0;
         
-        // INTERPOLATION: Smooth between current and last sample to remove buzzing
         int16_t currentSample = tempBuf[j];
+        // Linear Interpolation for smoothness
         int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        int32_t sample = (int32_t)((float)smoothedSample * vol * SAFETY_GAIN);
+        // Apply Global Gain + Note-Specific Scaling + Soft Fade
+        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * voices[i].noteGain);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
