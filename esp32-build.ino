@@ -4,7 +4,6 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
-// Hardware Pin Definitions
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
@@ -13,7 +12,6 @@
 #define I2S_LRC  44
 #define I2S_DOUT 3
 
-// Matrix Configuration
 const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 2}; 
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
@@ -30,32 +28,33 @@ const char* soundFiles[8][8] = {
 
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
-#define BUF_SIZE 256 
+#define BUF_SIZE 512 // Increased for smoother playback
 #define FADE_SAMPLES 120 
-#define SAFETY_GAIN 0.75f // Prevents square-wave distortion in high octaves
+#define SAFETY_GAIN 0.60f // Lowered further to eliminate 5th-octave clipping
 
 struct Voice {
   File file;
   int row = -1, col = -1;
   bool active = false;
   uint32_t samplesPlayed = 0;
+  int16_t lastSample = 0; // For smoothing transitions
 };
 
 Voice voices[MAX_VOICES];
 volatile bool sharedKeys[8][8] = {false}; 
 bool keyStates[8][8] = {false}; 
-int currentBank = 0; // 0 = Piano (P), 1 = Xylophone (X)
+int currentBank = 0; 
 
 void setupI2S() {
   i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX), // Fixed for Core 3.3.5
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
     .sample_rate = SAMPLE_RATE,
     .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4, 
-    .dma_buf_len = 512,
+    .dma_buf_count = 8, // More buffers = smoother audio
+    .dma_buf_len = 256,
     .use_apll = false
   };
   i2s_pin_config_t pin_config = {
@@ -65,7 +64,6 @@ void setupI2S() {
   i2s_set_pin(I2S_NUM_0, &pin_config);
 }
 
-// Core 0 Task: Matrix Scanning
 void scanTask(void * pvParameters) {
   for(;;) {
     for (int c = 0; c < 8; c++) {
@@ -86,33 +84,28 @@ void setup() {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
-  SD.begin(SD_CS, SPI, 40000000); // 40MHz high speed access
+  SD.begin(SD_CS, SPI, 40000000); 
   setupI2S();
-  xTaskCreatePinnedToCore(scanTask, "Scanner", 4096, NULL, 1, NULL, 0); // Core 0
+  xTaskCreatePinnedToCore(scanTask, "Scanner", 4096, NULL, 1, NULL, 0);
 }
 
 void loop() {
-  // Handle Key Logic and Bank Switching
   for (int c = 0; c < 8; c++) {
     for (int r = 0; r < 8; r++) {
       bool pressed = sharedKeys[r][c];
-      
       if (pressed && !keyStates[r][c]) {
-        if (r == 7 && c == 5) { // Switch Bank
-          currentBank = (currentBank == 0) ? 1 : 0;
-        } 
+        if (r == 7 && c == 5) { currentBank = (currentBank == 0) ? 1 : 0; } 
         else if (strcmp(soundFiles[r][c], "none") != 0) {
           for (int i = 0; i < MAX_VOICES; i++) {
             if (!voices[i].active) {
               char fullPath[32];
-              // Using your standard filenames (e.g. /P16.wav or /X16.wav)
               snprintf(fullPath, sizeof(fullPath), "/%c%s", (currentBank == 0 ? 'P' : 'X'), soundFiles[r][c] + 1);
-              
               voices[i].file = SD.open(fullPath);
               if (voices[i].file) {
                 voices[i].file.seek(44); 
                 voices[i].active = true;
-                voices[i].samplesPlayed = 0; // Prepare for soft-start
+                voices[i].samplesPlayed = 0;
+                voices[i].lastSample = 0;
                 voices[i].row = r; voices[i].col = c;
               }
               break; 
@@ -131,7 +124,6 @@ void loop() {
     }
   }
 
-  // Audio Mixing with Distortion and Pop Prevention
   int16_t mixBuf[BUF_SIZE] = {0};
   bool anyActive = false;
   
@@ -142,11 +134,14 @@ void loop() {
       size_t bytesRead = voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
       
       for (int j = 0; j < (int)(bytesRead / 2); j++) {
-        // Soft-Start Fade-in Logic
         float vol = (voices[i].samplesPlayed < FADE_SAMPLES) ? (float)voices[i].samplesPlayed / FADE_SAMPLES : 1.0;
         
-        // Apply SAFETY_GAIN and Volume ramp
-        int32_t sample = (int32_t)((float)tempBuf[j] * vol * SAFETY_GAIN);
+        // INTERPOLATION: Smooth between current and last sample to remove buzzing
+        int16_t currentSample = tempBuf[j];
+        int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
+        voices[i].lastSample = currentSample;
+
+        int32_t sample = (int32_t)((float)smoothedSample * vol * SAFETY_GAIN);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
@@ -161,6 +156,6 @@ void loop() {
     size_t written;
     i2s_write(I2S_NUM_0, mixBuf, sizeof(mixBuf), &written, portMAX_DELAY);
   } else {
-    i2s_zero_dma_buffer(I2S_NUM_0); // Prevent buzzing/noise when silent
+    i2s_zero_dma_buffer(I2S_NUM_0);
   }
 }
