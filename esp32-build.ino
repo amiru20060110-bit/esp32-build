@@ -28,11 +28,11 @@ const char* soundFiles[8][8] = {
   {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "none", "none"}
 };
 
-#define MAX_VOICES 4
+#define MAX_VOICES 8
 #define SAMPLE_RATE 32000
 #define BUF_SIZE 512 
 #define FADE_SAMPLES 250 
-#define GLOBAL_GAIN 0.60f 
+#define GLOBAL_GAIN 1.0f // CHANGED: Restored to full 100% volume
 
 struct Voice {
   File file;
@@ -56,7 +56,7 @@ void setupI2S() {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 12, // Increased for smoother polyphony
+    .dma_buf_count = 12, 
     .dma_buf_len = 256,
     .use_apll = false
   };
@@ -92,10 +92,8 @@ void setup() {
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
   
-  // Set SPI clock to 40MHz for faster sample loading
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
   if(!SD.begin(SD_CS, SPI, 40000000)) { 
-    // Fallback if 40MHz is too fast for your SD card module
     SD.begin(SD_CS, SPI, 20000000); 
   }
   
@@ -149,10 +147,9 @@ void loop() {
       int samplesInCycle = bytesRead / 2;
       
       for (int j = 0; j < samplesInCycle; j++) {
-        float noteGain = 1.0f - (voices[i].row * 0.05f);
+        // CHANGED: Removed "noteGain" octave damping to keep piano volumes natural
         float vol = 1.0f;
         
-        // Soft Start/End
         if (voices[i].samplesPlayed < FADE_SAMPLES) {
             vol = (float)voices[i].samplesPlayed / FADE_SAMPLES;
         } 
@@ -162,10 +159,11 @@ void loop() {
         if (vol < 0) vol = 0;
 
         int16_t currentSample = tempBuf[j];
-        int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2; //
+        int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * noteGain);
+        // CHANGED: sample calculation now uses full volume without reduction
+        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
