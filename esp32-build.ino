@@ -4,6 +4,7 @@
 #include "SPI.h"
 #include "driver/i2s.h"
 
+// Hardware Pin Definitions
 #define SD_MOSI 6
 #define SD_MISO 5
 #define SD_CLK  7
@@ -12,6 +13,7 @@
 #define I2S_LRC  44
 #define I2S_DOUT 3
 
+// Matrix Config
 const int colPins[8] = {40, 41, 42, 33, 34, 35, 39, 2}; 
 const int rowPins[8] = {15, 16, 17, 18, 38, 36, 37, 45}; 
 
@@ -29,7 +31,7 @@ const char* soundFiles[8][8] = {
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define BUF_SIZE 512 
-#define FADE_SAMPLES 200 // Smoothing for both start and end
+#define FADE_SAMPLES 250 
 #define GLOBAL_GAIN 0.60f 
 
 struct Voice {
@@ -37,7 +39,7 @@ struct Voice {
   int row = -1, col = -1;
   bool active = false;
   uint32_t samplesPlayed = 0;
-  uint32_t totalSamples = 0; // NEW: Track file length to prevent pops
+  uint32_t totalSamples = 0;
   int16_t lastSample = 0;
 };
 
@@ -54,12 +56,20 @@ void setupI2S() {
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8, 
+    .dma_buf_count = 12, // Increased for smoother polyphony
     .dma_buf_len = 256,
     .use_apll = false
   };
+  
+  i2s_pin_config_t my_pin_config = {
+    .bck_io_num = I2S_BCLK,
+    .ws_io_num = I2S_LRC,
+    .data_out_num = I2S_DOUT,
+    .data_in_num = I2S_PIN_NO_CHANGE
+  };
+
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-  i2s_set_pin(I2S_NUM_0, &pin_config);
+  i2s_set_pin(I2S_NUM_0, &my_pin_config);
 }
 
 void scanTask(void * pvParameters) {
@@ -81,8 +91,14 @@ void setup() {
     pinMode(colPins[i], OUTPUT); digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
   }
+  
+  // Set SPI clock to 40MHz for faster sample loading
   SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
-  SD.begin(SD_CS, SPI, 40000000); 
+  if(!SD.begin(SD_CS, SPI, 40000000)) { 
+    // Fallback if 40MHz is too fast for your SD card module
+    SD.begin(SD_CS, SPI, 20000000); 
+  }
+  
   setupI2S();
   xTaskCreatePinnedToCore(scanTask, "Scanner", 4096, NULL, 1, NULL, 0);
 }
@@ -100,7 +116,7 @@ void loop() {
               snprintf(fullPath, sizeof(fullPath), "/%c%s", (currentBank == 0 ? 'P' : 'X'), soundFiles[r][c] + 1);
               voices[i].file = SD.open(fullPath);
               if (voices[i].file) {
-                voices[i].totalSamples = (voices[i].file.size() - 44) / 2; // Calculate length
+                voices[i].totalSamples = (voices[i].file.size() - 44) / 2;
                 voices[i].file.seek(44); 
                 voices[i].active = true;
                 voices[i].samplesPlayed = 0;
@@ -130,26 +146,23 @@ void loop() {
       anyActive = true;
       int16_t tempBuf[BUF_SIZE];
       size_t bytesRead = voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
-      int samplesRead = bytesRead / 2;
+      int samplesInCycle = bytesRead / 2;
       
-      for (int j = 0; j < samplesRead; j++) {
+      for (int j = 0; j < samplesInCycle; j++) {
         float noteGain = 1.0f - (voices[i].row * 0.05f);
+        float vol = 1.0f;
         
-        // --- IMPROVED FADING LOGIC ---
-        float vol = 1.0;
-        
-        // Soft-Start (Fade-In)
+        // Soft Start/End
         if (voices[i].samplesPlayed < FADE_SAMPLES) {
             vol = (float)voices[i].samplesPlayed / FADE_SAMPLES;
         } 
-        // Soft-End (Fade-Out) - Detects the end of short samples
         else if (voices[i].samplesPlayed > (voices[i].totalSamples - FADE_SAMPLES)) {
             vol = (float)(voices[i].totalSamples - voices[i].samplesPlayed) / FADE_SAMPLES;
-            if (vol < 0) vol = 0;
         }
+        if (vol < 0) vol = 0;
 
         int16_t currentSample = tempBuf[j];
-        int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
+        int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2; //
         voices[i].lastSample = currentSample;
 
         int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * noteGain);
