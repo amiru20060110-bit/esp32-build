@@ -29,16 +29,16 @@ const char* soundFiles[8][8] = {
 #define MAX_VOICES 4
 #define SAMPLE_RATE 32000
 #define BUF_SIZE 512 
-#define FADE_SAMPLES 150 // Slightly longer fade-in for vibraphone
-#define GLOBAL_GAIN 0.55f // Master volume to prevent clipping
+#define FADE_SAMPLES 200 // Smoothing for both start and end
+#define GLOBAL_GAIN 0.60f 
 
 struct Voice {
   File file;
   int row = -1, col = -1;
   bool active = false;
   uint32_t samplesPlayed = 0;
+  uint32_t totalSamples = 0; // NEW: Track file length to prevent pops
   int16_t lastSample = 0;
-  float noteGain = 1.0f; // Individual gain per note
 };
 
 Voice voices[MAX_VOICES];
@@ -59,9 +59,6 @@ void setupI2S() {
     .use_apll = false
   };
   i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-  i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_BCLK, .ws_io_num = I2S_LRC, .data_out_num = I2S_DOUT, .data_in_num = I2S_PIN_NO_CHANGE
-  };
   i2s_set_pin(I2S_NUM_0, &pin_config);
 }
 
@@ -103,16 +100,11 @@ void loop() {
               snprintf(fullPath, sizeof(fullPath), "/%c%s", (currentBank == 0 ? 'P' : 'X'), soundFiles[r][c] + 1);
               voices[i].file = SD.open(fullPath);
               if (voices[i].file) {
+                voices[i].totalSamples = (voices[i].file.size() - 44) / 2; // Calculate length
                 voices[i].file.seek(44); 
                 voices[i].active = true;
                 voices[i].samplesPlayed = 0;
-                voices[i].lastSample = 0;
                 voices[i].row = r; voices[i].col = c;
-                
-                // --- NEW: Damping logic for high notes ---
-                // Low notes (row 0-2) stay loud. High notes (row 6-7) get quieter.
-                voices[i].noteGain = 1.0f - (r * 0.08f); 
-                if (currentBank == 1) voices[i].noteGain *= 0.8f; // Extra damping for Vibraphone
               }
               break; 
             }
@@ -138,17 +130,29 @@ void loop() {
       anyActive = true;
       int16_t tempBuf[BUF_SIZE];
       size_t bytesRead = voices[i].file.read((uint8_t*)tempBuf, BUF_SIZE * 2);
+      int samplesRead = bytesRead / 2;
       
-      for (int j = 0; j < (int)(bytesRead / 2); j++) {
-        float vol = (voices[i].samplesPlayed < FADE_SAMPLES) ? (float)voices[i].samplesPlayed / FADE_SAMPLES : 1.0;
+      for (int j = 0; j < samplesRead; j++) {
+        float noteGain = 1.0f - (voices[i].row * 0.05f);
         
+        // --- IMPROVED FADING LOGIC ---
+        float vol = 1.0;
+        
+        // Soft-Start (Fade-In)
+        if (voices[i].samplesPlayed < FADE_SAMPLES) {
+            vol = (float)voices[i].samplesPlayed / FADE_SAMPLES;
+        } 
+        // Soft-End (Fade-Out) - Detects the end of short samples
+        else if (voices[i].samplesPlayed > (voices[i].totalSamples - FADE_SAMPLES)) {
+            vol = (float)(voices[i].totalSamples - voices[i].samplesPlayed) / FADE_SAMPLES;
+            if (vol < 0) vol = 0;
+        }
+
         int16_t currentSample = tempBuf[j];
-        // Linear Interpolation for smoothness
         int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        // Apply Global Gain + Note-Specific Scaling + Soft Fade
-        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * voices[i].noteGain);
+        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * noteGain);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
