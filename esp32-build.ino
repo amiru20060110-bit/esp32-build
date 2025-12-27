@@ -25,8 +25,8 @@ const char* soundFiles[8][8] = {
   {"/48.wav", "/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav"},
   {"/56.wav", "/57.wav", "/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
   {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav", "/70.wav", "/71.wav"},
-  {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "VOL_KEY", "none"} 
-}; // CHANGED: Added VOL_KEY at Row 7, Col 6
+  {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "VOL_KEY", "SUSTAIN"} 
+}; 
 
 #define MAX_VOICES 5 
 #define SAMPLE_RATE 32000
@@ -47,7 +47,8 @@ Voice voices[MAX_VOICES];
 volatile bool sharedKeys[8][8] = {false}; 
 bool keyStates[8][8] = {false}; 
 int currentBank = 0; 
-float liveVol = 0.6f; // ADDED: Default volume set to 60%
+float liveVol = 0.6f; 
+bool sustainActive = false; // Tracks if Piano Sustain is ON
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -88,7 +89,7 @@ void scanTask(void * pvParameters) {
 }
 
 void setup() {
-  Serial.begin(115200); // For debugging volume levels
+  Serial.begin(115200);
   for (int i = 0; i < 8; i++) {
     pinMode(colPins[i], OUTPUT); digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
@@ -108,38 +109,65 @@ void loop() {
     for (int r = 0; r < 8; r++) {
       bool pressed = sharedKeys[r][c];
       if (pressed && !keyStates[r][c]) {
-        // Handle Logic Switches
+        // --- FUNCTION KEYS ---
         if (r == 7 && c == 5) { 
             currentBank = (currentBank == 0) ? 1 : 0; 
         } 
-        else if (r == 7 && c == 6) { // VOL_KEY Logic
+        else if (r == 7 && c == 6) { 
             if (liveVol >= 1.0f) liveVol = 0.6f;
             else if (liveVol >= 0.6f) liveVol = 0.3f;
             else liveVol = 1.0f;
-            Serial.printf("Volume Cycle: %.1f\n", liveVol);
         }
+        else if (r == 7 && c == 7) { 
+            sustainActive = !sustainActive;
+            Serial.printf("Sustain Mode: %s\n", sustainActive ? "ON" : "OFF");
+        }
+        // --- NOTE PLAYING ---
         else if (strcmp(soundFiles[r][c], "none") != 0 && strcmp(soundFiles[r][c], "SWITCH") != 0) {
+          int voiceIndex = -1;
+
+          // 1. Find free voice
           for (int i = 0; i < MAX_VOICES; i++) {
-            if (!voices[i].active) {
-              char fullPath[32];
-              snprintf(fullPath, sizeof(fullPath), "/%c%s", (currentBank == 0 ? 'P' : 'X'), soundFiles[r][c] + 1);
-              voices[i].file = SD.open(fullPath);
-              if (voices[i].file) {
-                voices[i].totalSamples = (voices[i].file.size() - 44) / 2;
-                voices[i].file.seek(44); 
-                voices[i].active = true;
-                voices[i].samplesPlayed = 0;
-                voices[i].row = r; voices[i].col = c;
+            if (!voices[i].active) { voiceIndex = i; break; }
+          }
+
+          // 2. Voice Stealing: Find oldest if no free voice
+          if (voiceIndex == -1) {
+            uint32_t maxProgress = 0;
+            for (int i = 0; i < MAX_VOICES; i++) {
+              if (voices[i].samplesPlayed > maxProgress) {
+                maxProgress = voices[i].samplesPlayed;
+                voiceIndex = i;
               }
-              break; 
+            }
+            if (voiceIndex != -1) {
+              voices[voiceIndex].file.close(); // Stop oldest immediately
+              voices[voiceIndex].active = false;
+            }
+          }
+
+          // 3. Start the New Note
+          if (voiceIndex != -1) {
+            char fullPath[32];
+            snprintf(fullPath, sizeof(fullPath), "/%c%s", (currentBank == 0 ? 'P' : 'X'), soundFiles[r][c] + 1);
+            voices[voiceIndex].file = SD.open(fullPath);
+            if (voices[voiceIndex].file) {
+              voices[voiceIndex].totalSamples = (voices[voiceIndex].file.size() - 44) / 2;
+              voices[voiceIndex].file.seek(44); 
+              voices[voiceIndex].active = true;
+              voices[voiceIndex].samplesPlayed = 0;
+              voices[voiceIndex].row = r; voices[voiceIndex].col = c;
             }
           }
         }
       } 
       else if (!pressed && keyStates[r][c]) {
-        for (int i = 0; i < MAX_VOICES; i++) {
-          if (voices[i].active && voices[i].row == r && voices[i].col == c) {
-            voices[i].file.close(); voices[i].active = false;
+        // Release Logic: Ignore if Sustain is ON and Bank is Piano (0)
+        if (!(sustainActive && currentBank == 0)) {
+          for (int i = 0; i < MAX_VOICES; i++) {
+            if (voices[i].active && voices[i].row == r && voices[i].col == c) {
+              voices[i].file.close(); voices[i].active = false;
+            }
           }
         }
       }
@@ -147,6 +175,7 @@ void loop() {
     }
   }
 
+  // --- MIXER ---
   int16_t mixBuf[BUF_SIZE] = {0};
   bool anyActive = false;
   
@@ -158,22 +187,25 @@ void loop() {
       int samplesInCycle = bytesRead / 2;
       
       for (int j = 0; j < samplesInCycle; j++) {
-        float vol = 1.0f;
+        float envVol = 1.0f;
         
+        // Attack Fade
         if (voices[i].samplesPlayed < FADE_SAMPLES) {
-            vol = (float)voices[i].samplesPlayed / FADE_SAMPLES;
+            envVol = (float)voices[i].samplesPlayed / FADE_SAMPLES;
         } 
+        // Release Fade (Natural file end)
         else if (voices[i].samplesPlayed > (voices[i].totalSamples - FADE_SAMPLES)) {
-            vol = (float)(voices[i].totalSamples - voices[i].samplesPlayed) / FADE_SAMPLES;
+            envVol = (float)(voices[i].totalSamples - voices[i].samplesPlayed) / FADE_SAMPLES;
         }
-        if (vol < 0) vol = 0;
+        if (envVol < 0) envVol = 0;
 
         int16_t currentSample = tempBuf[j];
+        // Anti-click smoothing
         int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        // CHANGED: Added liveVol to the final mixing calculation
-        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * liveVol);
+        // Apply Volume Multipliers
+        int32_t sample = (int32_t)((float)smoothedSample * envVol * GLOBAL_GAIN * liveVol);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
