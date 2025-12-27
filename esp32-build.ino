@@ -28,11 +28,12 @@ const char* soundFiles[8][8] = {
   {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "none", "none"}
 };
 
-#define MAX_VOICES 8
+// CHANGED: Polyphony reduced to 5 for better stability
+#define MAX_VOICES 5 
 #define SAMPLE_RATE 32000
 #define BUF_SIZE 512 
 #define FADE_SAMPLES 250 
-#define GLOBAL_GAIN 1.0f // CHANGED: Restored to full 100% volume
+#define GLOBAL_GAIN 1.0f 
 
 struct Voice {
   File file;
@@ -147,7 +148,6 @@ void loop() {
       int samplesInCycle = bytesRead / 2;
       
       for (int j = 0; j < samplesInCycle; j++) {
-        // CHANGED: Removed "noteGain" octave damping to keep piano volumes natural
         float vol = 1.0f;
         
         if (voices[i].samplesPlayed < FADE_SAMPLES) {
@@ -162,7 +162,6 @@ void loop() {
         int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        // CHANGED: sample calculation now uses full volume without reduction
         int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
