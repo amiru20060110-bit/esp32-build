@@ -25,10 +25,9 @@ const char* soundFiles[8][8] = {
   {"/48.wav", "/49.wav", "/50.wav", "/51.wav", "/52.wav", "/53.wav", "/54.wav", "/55.wav"},
   {"/56.wav", "/57.wav", "/58.wav", "/59.wav", "/60.wav", "/61.wav", "/62.wav", "/63.wav"},
   {"/64.wav", "/65.wav", "/66.wav", "/67.wav", "/68.wav", "/69.wav", "/70.wav", "/71.wav"},
-  {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "none", "none"}
-};
+  {"/72.wav", "/73.wav", "/74.wav", "/75.wav", "/76.wav", "SWITCH", "VOL_KEY", "none"} 
+}; // CHANGED: Added VOL_KEY at Row 7, Col 6
 
-// CHANGED: Polyphony reduced to 5 for better stability
 #define MAX_VOICES 5 
 #define SAMPLE_RATE 32000
 #define BUF_SIZE 512 
@@ -48,6 +47,7 @@ Voice voices[MAX_VOICES];
 volatile bool sharedKeys[8][8] = {false}; 
 bool keyStates[8][8] = {false}; 
 int currentBank = 0; 
+float liveVol = 0.6f; // ADDED: Default volume set to 60%
 
 void setupI2S() {
   i2s_config_t i2s_config = {
@@ -88,6 +88,7 @@ void scanTask(void * pvParameters) {
 }
 
 void setup() {
+  Serial.begin(115200); // For debugging volume levels
   for (int i = 0; i < 8; i++) {
     pinMode(colPins[i], OUTPUT); digitalWrite(colPins[i], LOW);
     pinMode(rowPins[i], INPUT_PULLDOWN);
@@ -107,7 +108,16 @@ void loop() {
     for (int r = 0; r < 8; r++) {
       bool pressed = sharedKeys[r][c];
       if (pressed && !keyStates[r][c]) {
-        if (r == 7 && c == 5) { currentBank = (currentBank == 0) ? 1 : 0; } 
+        // Handle Logic Switches
+        if (r == 7 && c == 5) { 
+            currentBank = (currentBank == 0) ? 1 : 0; 
+        } 
+        else if (r == 7 && c == 6) { // VOL_KEY Logic
+            if (liveVol >= 1.0f) liveVol = 0.6f;
+            else if (liveVol >= 0.6f) liveVol = 0.3f;
+            else liveVol = 1.0f;
+            Serial.printf("Volume Cycle: %.1f\n", liveVol);
+        }
         else if (strcmp(soundFiles[r][c], "none") != 0 && strcmp(soundFiles[r][c], "SWITCH") != 0) {
           for (int i = 0; i < MAX_VOICES; i++) {
             if (!voices[i].active) {
@@ -162,7 +172,8 @@ void loop() {
         int16_t smoothedSample = (currentSample + voices[i].lastSample) / 2;
         voices[i].lastSample = currentSample;
 
-        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN);
+        // CHANGED: Added liveVol to the final mixing calculation
+        int32_t sample = (int32_t)((float)smoothedSample * vol * GLOBAL_GAIN * liveVol);
         int32_t mixed = (int32_t)mixBuf[j] + sample;
         
         mixBuf[j] = (int16_t)constrain(mixed, -32768, 32767);
